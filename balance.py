@@ -3,6 +3,7 @@ import random
 class Distance:
     @staticmethod
     def Euclidean(a:list,b:list):
+        #print(len(a),len(b))
         r=0
         for i in range(len(a)):
             r+=(a[i]-b[i])**2
@@ -35,14 +36,18 @@ class Distance:
 
 
 class Balance: #binary data
-    def __init__(self,sources,targets):
+    def __init__(self,sources,targets,flat_func=(lambda x: x),scaler=(lambda x: x)):
         self.sources=sources
         self.targets=targets
+        self.flat_func=flat_func
+        self.scaler=scaler
 
     def sel_with_class(self,class_) -> [int]:
         res=[]
         for i in range(len(self.targets)):
-            if targets[i]==class_:
+            #print(self.targets[i]==class_)
+            #print(class_)
+            if self.targets[i]==class_ and self.sources[i] is not None:
                 res.append(i)
 
         return res
@@ -52,24 +57,14 @@ class Balance: #binary data
         self.sources[r]=None
     
     def _clear(self,l):
-        l2=[]
-        for i in l:
-            if i is not None:
-                l2.append(i)
-        return l2
+        return [x for x in l if x is not None]
     
     def clear(self):
         self.targets=self._clear(self.targets)
         self.sources=self._clear(self.sources)
 
-    def flatten(self,x):
-        if not isinstance(x, list):
-            return x
-        else:
-            return list(map(self.flatten,x))
-
     def d_src(self,distance,a,b):
-        return distance(self.flatten(self.sources[a]),self.flatten(self.sources[b]))
+        return distance(self.scaler(self.flat_func(self.sources[a])),self.scaler(self.flat_func(self.sources[b])))
 
     def RandomUndersampling(self,class1,class2,threshold=0):
         #class1 - major, class2 - minor
@@ -146,14 +141,23 @@ class Balance: #binary data
                 class1_elems=self.sel_with_class(class1)
         self.clear()
 
-    def TomekLinks(self,class1,class2,distance,delta):
+    def TomekLinks(self,class1,class2,distance,delta=0):
         class1_elems=self.sel_with_class(class1)
         class2_elems=self.sel_with_class(class2)
         to_delete=[]
+
+        min_d_minors=[]
+
+        for minor in class2_elems:
+            min_d_minor=min(self.d_src(distance,x,minor) for x in class1_elems+class2_elems)
+            min_d_minors.append(min_d_minor)
+
         for major in class1_elems:
-            for minor in class2_elems:
-                d=self.d_src(distance,major,minor)
-                if d<=delta:
+            #all the distances
+            min_d=min(self.d_src(distance,major,x) for x in class2_elems+class2_elems)
+
+            for min_d_minor in min_d_minors:
+                if abs(min_d_minor-min_d)<=delta:
                     to_delete.append(major)
 
         for r in to_delete:
@@ -175,11 +179,11 @@ if __name__=='__main__':
 
     b=Balance(sources,targets)
     #RandomUndersampling, KBorder, NearMiss1, NearMiss3, TomekLinks
-    d=Distance.Manhattan
+    d=Distance.Euclidean
     #b.RandomUndersampling(0,1)
-    #b.KBorder(0,1,d,2)
+    #b.KBorder(0,1,d,1)
     #b.NearMiss1(0,1,d,2)
     #b.NearMiss3(0,1,d,2)
-    #b.TomekLinks(0,1,d,12)
+    #b.TomekLinks(0,1,d,5)
     print(b.sources,b.targets)
     print(len(b.sources),len(b.targets))

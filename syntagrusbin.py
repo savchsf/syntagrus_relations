@@ -5,8 +5,10 @@ import torch
 import math
 import random
 
-from collections import Counter
-from itertools import  chain
+from balance import Balance, Distance
+import copy
+
+#from collections import Counter
 
 class SynTagRusBinarizer(Binarizer):
     def __init__(self,use_bert=True,bert_name='sergeyzh/rubert-large-uncased-sts',normalize=True, vec_result=True, one_hot=True,batch_size=32,unk_token='_'):
@@ -62,7 +64,7 @@ class SynTagRusBinarizer(Binarizer):
     def _encode_discr(self,elem,all_elems,hot=True,normalize=True):
         if hot:
             return self._one_hot(elem,all_elems)
-        return [self._bag_of_words_item(elem,elems,normalize=normalize)]
+        return [self._bag_of_words_item(elem,all_elems,normalize=normalize)]
 
     def _pair_word(self,w1,w2):
         w1_emb=self._encode_word(w1['word'],normalize=self.normalize,bert=self.use_bert)
@@ -83,7 +85,7 @@ class SynTagRusBinarizer(Binarizer):
         return [w1_pos,w2_pos]
 
     def _pair_morph(self,w1,w2):
-        w1_morph=self.vectorize_features(w1['features'],self.data.all_features,normalize=self.normalize)
+        w1_morph=self.vectorize_features(w1['features'],self.data.all_features,normalize=self.normalize,hot=self.one_hot)
         w2_morph=[0]*len(w1_morph)
         if w2:
             w2_morph=self.vectorize_features(w2['features'],self.data.all_features,normalize=self.normalize,hot=self.one_hot)
@@ -207,21 +209,23 @@ class SynTagRusBinarizer(Binarizer):
         if self.use_bert:
             word_bert=self._decode_bert(self.words,batch_size=self.batch_size)
             #print(word_bert)
-        if use_sentenceemb:
-            sen_bert=self._decode_bert(self.sentences,batch_size=self.batch_size)
-
-        for i in range(len(self.sources)):
-            #self.targets[i][0] w1
-            #self.targets[i][1] w2
-            #self.targets[i][self.s_idx] sen
-            self.sources[i][0]=word_bert[curr_w]
-            curr_w+=1
-            self.sources[i][1]=word_bert[curr_w]
-            curr_w+=1
-
             if use_sentenceemb:
-                self.sources[i][self.s_idx]=sen_bert[curr_s]
-                curr_s+=1
+                sen_bert=self._decode_bert(self.sentences,batch_size=self.batch_size)
+
+            for i in range(len(self.sources)):
+                #self.targets[i][0] w1
+                #self.targets[i][1] w2
+                #self.targets[i][self.s_idx] sen
+                self.sources[i][0]=word_bert[curr_w]
+                curr_w+=1
+                self.sources[i][1]=word_bert[curr_w]
+                curr_w+=1
+
+                if use_sentenceemb:
+                    self.sources[i][self.s_idx]=sen_bert[curr_s]
+                    curr_s+=1
+
+        
 
 
     def save(self,path): 
@@ -236,7 +240,7 @@ class SynTagRusBinarizer(Binarizer):
         self.sources=loaded_data['sources']
         self.targets=loaded_data['targets']
 
-    def generate_negative(self,ratio):
+    def generate_negative_data(self,ratio):
         number=len(self.data.tokens)
         gen_n=math.ceil(number*ratio)
         result=[]
@@ -252,7 +256,7 @@ class SynTagRusBinarizer(Binarizer):
                 if t['sentence']==sentence_n and t['head']!=curr_rel:
                     all_tokens_no_rel.append(t)
             generate_n=random.randint(0,len(all_tokens_no_rel)-1)
-            new_token=word
+            new_token=copy.deepcopy(word)
             new_token['head']=all_tokens_no_rel[generate_n]['no_in_sentence']
             new_token['relation']=self.unk_token
             result.append(new_token)
@@ -266,7 +270,7 @@ class SynTagRusBinarizer(Binarizer):
         #only call if use_head
         if self.head_idx:
             sample[0],sample[1]=sample[1],sample[0]
-            sample[head_idx]=(sample[head_idx]+1)%2
+            sample[self.head_idx]=(sample[self.head_idx]+1)%2
         return sample
     
     def shuffle_head(self,sources,chance=0):
@@ -301,6 +305,73 @@ class SynTagRusBinarizer(Binarizer):
             if r<ratio:
                 self.sources[i],self.targets[i]=self._gen_neg_head_one(self.sources[i],self.targets[i])
 
+    @staticmethod
+    def _flat4dist(l):
+        l=SynTagRusBinarizer._glue_all(l) #tensor
+        return l.tolist()
+
+    @staticmethod
+    def _scaler_norm(l):
+        mu=(sum(l))/(len(l))
+        sigma=0
+        for i in l:
+            sigma+=(i-mu)**2
+        sigma=(sigma/len(l))**0.5
+        return [(x-mu)/sigma for x in l]
+
+
+    def get_major_minor_classes(self):
+        #ХЗ
+        major_classes=[]
+        minor_classes=[]
+        counts={}
+        was_list=False
+
+        for sample in self.targets:
+            key=sample
+            if (isinstance(key,list)):
+                key=tuple(key)
+                was_list=True
+            if key not in counts:
+                counts[key]=0
+            counts[key]+=1
+
+        equal_percent=1/len(counts)
+        n=len(self.targets)
+        
+        for class_, count in counts.items():
+            var=count/n
+            if was_list:
+                class_=list(class_)
+            if var>=equal_percent:
+                major_classes.append(class_)
+            else:
+                minor_classes.append(class_)
+        
+        major_classes.sort()
+        minor_classes.sort()
+
+        return major_classes, minor_classes
+
+    def balance_dataset(self,dist=Distance.Euclidean,nm_k=3,tl_delta=0.2):
+
+        
+        major_classes,minor_classes=self.get_major_minor_classes()
+        #print(len(major_classes))
+        #print(len(minor_classes))
+
+        
+
+        balance_instance=Balance(self.sources,self.targets,self._flat4dist,self._scaler_norm)
+
+        for minor in minor_classes:
+            for major in major_classes:
+                balance_instance.NearMiss3(major,minor,dist,nm_k)
+                balance_instance.TomekLinks(major,minor,Distance.Cosine,tl_delta)
+
+        self.sources=balance_instance.sources
+        self.targets=balance_instance.targets
+
 
     def generate_dataset(self,use_head=False,do_shuffle=True,neg_ratio=0.3,predict_head=True,
                         use_pos=True, use_morph=True, use_sentenceemb=True, use_s_no=True, use_distance=True,
@@ -308,12 +379,37 @@ class SynTagRusBinarizer(Binarizer):
         #final dataset: aug (?), neg, shuffle, balance, move head to targets, gluing the tensors
         #gen_dataset
         #....
+        #use_head - использовать head в SOURCES
         '''
         use_pos=True, use_morph=True, use_sentenceemb=True, use_s_no=True, use_distance=True,
             binary=False, use_head=False
         '''
+
+        if use_head and not(predict_head):
+            neg_ratio/=2
+
+        self.generate_negative_data(neg_ratio)
+
         self.gen_dataset(use_pos=use_pos,use_morph=use_morph,use_sentenceemb=use_sentenceemb,use_s_no=use_s_no,
                         use_distance=use_distance, binary=binary,use_head=(use_head or predict_head))
+        
+        #print([len(self._flat4dist(x)) for x in self.sources])
+
+        if use_head and not(predict_head):
+            self.generate_negative_head(neg_ratio)
+            
+
+        if do_shuffle:
+            self.shuffle_data()
+
+        #balance here....
+
+        #print([len(self._flat4dist(x)) for x in self.sources])
+
+
+        #print(len(self.targets))
+        self.balance_dataset()
+        #print(len(self.targets))
 
         if predict_head:
             for i in range(len(self.sources)): #перекидывание головы
@@ -326,28 +422,17 @@ class SynTagRusBinarizer(Binarizer):
                 else:
                     self.targets[i]=[self.targets[i],head_param]
 
-        if neg_ratio>0:
-            if use_head and not(predict_head):
-                neg_ratio/=2
-                self.generate_negative_head(neg_ratio)
-            self.generate_negative(neg_ratio)
-            
-
-        if do_shuffle:
-            self.shuffle_data()
-
-        #balance here....
-
         for i in range(len(self.sources)):
-            self._glue_all(self.sources[i])
+            self.sources[i]=self._glue_all(self.sources[i]).numpy()
             self.targets[i]=torch.Tensor(self.targets[i]).numpy()
         
 if __name__=='__main__':
-    b=SynTagRusBinarizer(use_bert=True,batch_size=64,vec_result=False)
+    b=SynTagRusBinarizer(use_bert=False,batch_size=64,vec_result=True)
     b.load_data('dataset/slice.conllu')
 
-    b.generate_dataset()
+    b.generate_dataset(use_sentenceemb=False)
     #print(b.sources,b.targets)
+    print(b.sources[-1])
     print(b.targets[-1])
 
     b.save('here.pt')

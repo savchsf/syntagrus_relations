@@ -27,24 +27,23 @@ class Binarizer:
             vector.append(self._bag_of_words_item(i,whole_list,normalize))
         return vector
 
-    def vectorize_features(self,features,all_features,normalize=True,hot=True):
-        #all features = {'Animacy': ['Anim', 'Inan'], ...}
-
-        feature_keys=list(all_features.keys())
-
-        vector=[0]*len(feature_keys)
-        
-        for feature in features: #features = {'Animacy': 'Inan', 'Case': 'Acc', 'Gender': 'Masc', 'Number': 'Plur'}
-            #current: feature ='Animacy', features[feature]='Inan'
-            value = features[feature]
-            if not hot:
-
+    def vectorize_features(self, features, all_features, normalize=True, hot=True):
+        feature_keys = list(all_features.keys())
+        if not hot:
+            vector=[0]*len(feature_keys)
+            for feature, value in features.items():
                 if feature in feature_keys:
                     vector_pos=feature_keys.index(feature)
                     vector[vector_pos]=self._bag_of_words_item(value,all_features[feature],normalize)
-            else:
-                vector.extend(self._one_hot(value,all_features[feature]))
+            return vector
 
+        vector=[]
+        for feature in feature_keys:
+            values=all_features[feature]
+            if feature in features:
+                vector.extend(self._one_hot(features[feature], values))
+            else:
+                vector.extend([0]*len(values))
         return vector
 
     def _mean_embed(self,embeddings): #torch.Tensor
@@ -105,14 +104,15 @@ class Binarizer:
         return vector
 
 
-
-    def _glue_all(self,results:list):
+    @staticmethod
+    def _glue_all(results:list):
         #for elem in list: torch.Tensor(elem)
-        vectors=[]
-        vectors=[torch.Tensor(elem) for elem in results]
-        final_vector=torch.cat(vectors,dim=0)
-
-        return final_vector.numpy()
+        vectors = []
+        for elem in results:
+            if not isinstance(elem, torch.Tensor):
+                elem=torch.Tensor(elem)
+            vectors.append(elem)
+        return torch.cat(vectors, dim=0)
 
     
 
