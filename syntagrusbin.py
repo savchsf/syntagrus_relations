@@ -405,9 +405,9 @@ class SynTagRusBinarizer(Binarizer):
         #print([len(self._flat4dist(x)) for x in self.sources])
 
 
-        print(len(self.targets))
+        #print(len(self.targets))
         self.balance_dataset()
-        print(len(self.targets))
+        #print(len(self.targets))
 
         if predict_head:
             for i in range(len(self.sources)): #перекидывание головы
