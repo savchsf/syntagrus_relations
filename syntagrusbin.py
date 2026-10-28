@@ -269,16 +269,16 @@ class SynTagRusBinarizer(Binarizer):
         #idx: 0-not head, 1-head,self.head_idx
         #only call if use_head
         if self.head_idx:
+            #print(sample[self.head_idx])
             sample[0],sample[1]=sample[1],sample[0]
-            sample[self.head_idx]=(sample[self.head_idx]+1)%2
+            sample[self.head_idx]=[(sample[self.head_idx][0]+1)%2]
         return sample
     
-    def shuffle_head(self,sources,chance=0):
-        for i in range(len(sources)):
+    def shuffle_head(self,chance=0):
+        for i in range(len(self.sources)):
             r=random.random()
             if r<chance:
-                sources[i]=self._shuffle_head_one(sources[i])
-        return sources
+                self.sources[i]=self._shuffle_head_one(self.sources[i])
 
     def shuffle_data(self):
         indices=list(range(len(self.targets)))
@@ -292,18 +292,26 @@ class SynTagRusBinarizer(Binarizer):
 
     def _gen_neg_head_one(self,sample,tsample):
         if self.head_idx:
-            sample[self.head_idx]=(sample[self.head_idx]+1)%2
+            #print(sample[self.head_idx])
+            sample[self.head_idx]=[(sample[self.head_idx][0]+1)%2]
             if isinstance(tsample,list):
-                tsample[self.head_idx]=[0]*len(tsample)
+                tsample=[0]*len(tsample)
             else:
                 tsample=0
         return sample,tsample
 
+
     def generate_negative_head(self,ratio):
-        for i in range(len(self.sources)):
-            r=random.random()
-            if r<ratio:
-                self.sources[i],self.targets[i]=self._gen_neg_head_one(self.sources[i],self.targets[i])
+        number=len(self.targets)
+        gen_n=math.ceil(number*ratio)
+        result=[]
+
+        for sample in range(gen_n):
+            random_s=random.randint(0,number-1)
+            new_s,new_t=copy.deepcopy(self.sources[random_s]),copy.deepcopy(self.targets[random_s])
+            new_s,new_t=self._gen_neg_head_one(new_s,new_t)
+            self.sources.append(new_s)
+            self.targets.append(new_t)
 
     @staticmethod
     def _flat4dist(l):
@@ -321,7 +329,6 @@ class SynTagRusBinarizer(Binarizer):
 
 
     def get_major_minor_classes(self):
-        #ХЗ
         major_classes=[]
         minor_classes=[]
         counts={}
@@ -332,6 +339,7 @@ class SynTagRusBinarizer(Binarizer):
             if (isinstance(key,list)):
                 key=tuple(key)
                 was_list=True
+            #print(key)
             if key not in counts:
                 counts[key]=0
             counts[key]+=1
@@ -373,7 +381,7 @@ class SynTagRusBinarizer(Binarizer):
         self.targets=balance_instance.targets
 
 
-    def generate_dataset(self,use_head=False,do_shuffle=True,neg_ratio=0.3,predict_head=True,
+    def generate_dataset(self,use_head=True,do_shuffle=True,neg_ratio=0.3,predict_head=True,
                         use_pos=True, use_morph=True, use_sentenceemb=True, use_s_no=True, use_distance=True,
                         binary=False):
         #final dataset: aug (?), neg, shuffle, balance, move head to targets, gluing the tensors
@@ -394,20 +402,23 @@ class SynTagRusBinarizer(Binarizer):
                         use_distance=use_distance, binary=binary,use_head=(use_head or predict_head))
         
         #print([len(self._flat4dist(x)) for x in self.sources])
+        print('basic dataset gen + negatives',len(self.targets))
 
-        if use_head and not(predict_head):
+        if use_head or predict_head:
             self.generate_negative_head(neg_ratio)
+
+        print('after generating heads',len(self.targets))
             
 
         if do_shuffle:
+            if use_head or predict_head:
+                self.shuffle_head(chance=0.5)
+
             self.shuffle_data()
 
         #print([len(self._flat4dist(x)) for x in self.sources])
-
-
-        #print(len(self.targets))
         self.balance_dataset()
-        #print(len(self.targets))
+        print('after balancing',len(self.targets))
 
         if predict_head:
             for i in range(len(self.sources)): #перекидывание головы
@@ -428,7 +439,7 @@ if __name__=='__main__':
     b=SynTagRusBinarizer(use_bert=False,batch_size=64,vec_result=True)
     b.load_data('dataset/slice.conllu')
 
-    b.generate_dataset(use_sentenceemb=False)
+    b.generate_dataset(use_sentenceemb=False,predict_head=True)
     #print(b.sources,b.targets)
     print(b.sources[-1])
     print(b.targets[-1])
