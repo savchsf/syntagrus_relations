@@ -367,7 +367,7 @@ class SynTagRusBinarizer(Binarizer):
         for minor in minor_classes:
             for major in major_classes:
                 balance_instance.NearMiss3(major,minor,dist,nm_k)
-                balance_instance.TomekLinks(major,minor,Distance.Cosine,tl_delta)
+                balance_instance.TomekLinks(major,minor,dist,tl_delta)
 
         self.sources=balance_instance.sources
         self.targets=balance_instance.targets
@@ -402,14 +402,12 @@ class SynTagRusBinarizer(Binarizer):
         if do_shuffle:
             self.shuffle_data()
 
-        #balance here....
-
         #print([len(self._flat4dist(x)) for x in self.sources])
 
 
-        #print(len(self.targets))
+        print(len(self.targets))
         self.balance_dataset()
-        #print(len(self.targets))
+        print(len(self.targets))
 
         if predict_head:
             for i in range(len(self.sources)): #перекидывание головы

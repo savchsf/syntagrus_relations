@@ -154,7 +154,7 @@ class Balance: #binary data
 
         for major in class1_elems:
             #all the distances
-            min_d=min(self.d_src(distance,major,x) for x in class2_elems+class2_elems)
+            min_d=min(self.d_src(distance,major,x) for x in class1_elems+class2_elems)
 
             for min_d_minor in min_d_minors:
                 if abs(min_d_minor-min_d)<=delta:
