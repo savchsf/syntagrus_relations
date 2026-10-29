@@ -6,10 +6,11 @@ class Binarizer:
     def __init__(self,use_bert=True,bert_name='sergeyzh/rubert-large-uncased-sts'):
         self.tokenizer = None
         self.model=None
+        self.bert_name=bert_name
 
         if use_bert:
-            self.tokenizer = BertTokenizer.from_pretrained(bert_name)
-            self.model = BertModel.from_pretrained(bert_name)
+            self.tokenizer = BertTokenizer.from_pretrained(self.bert_name)
+            self.model = BertModel.from_pretrained(self.bert_name)
             self.model.eval()
 
     def _bag_of_words_item(self,item,whole_list,normalize=True):
