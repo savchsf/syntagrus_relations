@@ -8,10 +8,17 @@ class Binarizer:
         self.model=None
         self.bert_name=bert_name
 
-        if use_bert:
+    def _init_bert(self):
+        try:
+            self.tokenizer = BertTokenizer.from_pretrained(self.bert_name,local_files_only=True)
+            self.model = BertModel.from_pretrained(self.bert_name,local_files_only=True)
+            
+        except Exception:
+            print("Downloading models...")
             self.tokenizer = BertTokenizer.from_pretrained(self.bert_name)
             self.model = BertModel.from_pretrained(self.bert_name)
-            self.model.eval()
+        
+        self.model.eval()
 
     def _bag_of_words_item(self,item,whole_list,normalize=True):
         if item not in whole_list:
