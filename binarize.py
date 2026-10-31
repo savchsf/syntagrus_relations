@@ -1,5 +1,6 @@
 import torch
 from transformers import BertTokenizer, BertModel
+import numpy as np
 
 class Binarizer:
 
@@ -20,11 +21,13 @@ class Binarizer:
         
         self.model.eval()
 
-    def _bag_of_words_item(self,item,whole_list,normalize=True):
+    def _bag_of_words_item(self,item,whole_list,normalize=True,cached=True):
         if item not in whole_list:
             return 0
-        #else: 0 is reserved for OOV
-        result=whole_list.index(item)+1
+        if cached:
+            result=whole_list[item]
+        else:
+            result=whole_list.index(item)+1
         if normalize:
             result=result/len(whole_list)
         return result
@@ -35,24 +38,20 @@ class Binarizer:
             vector.append(self._bag_of_words_item(i,whole_list,normalize))
         return vector
 
-    def vectorize_features(self, features, all_features, normalize=True, hot=True):
-        feature_keys = list(all_features.keys())
-        if not hot:
-            vector=[0]*len(feature_keys)
-            for feature, value in features.items():
-                if feature in feature_keys:
-                    vector_pos=feature_keys.index(feature)
-                    vector[vector_pos]=self._bag_of_words_item(value,all_features[feature],normalize)
+    def vectorize_features(self,features, all_features, normalize=True, hot=True, cached=True):
+        if hot:
+            vector=[0]*len(all_features)
+            for feature in features:
+                idx=0
+                if feature in all_features:
+                    if cached:
+                        idx=all_features[feature]-1
+                    else:
+                        idx=all_features.index(feature)
+                vector[idx]=1
             return vector
+        return self.bag_of_words_list(features,all_features,normalize=cached,cached=cached)
 
-        vector=[]
-        for feature in feature_keys:
-            values=all_features[feature]
-            if feature in features:
-                vector.extend(self._one_hot(features[feature], values))
-            else:
-                vector.extend([0]*len(values))
-        return vector
 
     def _mean_embed(self,embeddings): #torch.Tensor
         #print(embeddings.shape)
@@ -89,7 +88,7 @@ class Binarizer:
 
         for i in range(embeddings.size(0)):
             batch=embeddings[i]
-            outputs.append(self._pooler(batch))
+            outputs.append(self._pooler(batch).numpy())
 
         return outputs
 
@@ -100,27 +99,19 @@ class Binarizer:
             results.extend(self._bert_batch_words(b))
         return results  
 
-    def _one_hot(self,value,all_values):
-        #value: blue
-        #all_values: [red, green, blue]
-        #result: [0,0,1]
-        vector=[0]*len(all_values)
-
-        if value in all_values:
-            vector[all_values.index(value)]=1
-
+    def _one_hot(self, value, all_values, cached=True):
+        vector = [0]*len(all_values)
+        if cached:
+            if value in all_values:
+                vector[all_values[value]-1] = 1
+        else:
+            if value in all_values:
+                vector[all_values.index(value)] = 1
         return vector
-
 
     @staticmethod
     def _glue_all(results:list):
-        #for elem in list: torch.Tensor(elem)
-        vectors = []
-        for elem in results:
-            if not isinstance(elem, torch.Tensor):
-                elem=torch.Tensor(elem)
-            vectors.append(elem)
-        return torch.cat(vectors, dim=0)
+        return np.concatenate(results)
 
     
 

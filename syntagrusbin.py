@@ -12,6 +12,8 @@ import json
 
 import os
 
+import numpy as np
+
 class SynTagRusBinarizer(Binarizer):
     def __init__(self,use_bert=True,bert_name='sergeyzh/rubert-large-uncased-sts',normalize=True,
     vec_result=True, one_hot=True,batch_size=32,unk_token='_',
@@ -55,20 +57,65 @@ class SynTagRusBinarizer(Binarizer):
 
         self.scheme=dict()
 
+        #cache
+        self.sentence_len_cache=[]
+        self.sentence_tokens_cache={} #{no_sen:[token1 token2]}
+
+        #bag of words caches
+        self.bow_words={} #word:idx
+        self.bow_pos={} #pos:idx
+        self.bow_features={} #feature:idx kn all_features
+        #delete encode_discr
+        self.bow_rel={} #rel:idx
+
+        #to do: find shifted head_idx (convert to np.array on the go, not in the end)
+        #optimize balance
+        #cache scaled and unscaled vectors
+        #remove flatten (pt. 1)
+        #parallel balance
+        #check idxs
+
+    def _bag_of_words_cache_init(self):
+        '''
+        self.bow_words={} #word:idx
+        self.bow_pos={} #pos:idx
+        self.bow_features={}
+        '''
+        self.bow_words = {x: i +1 for i, x in enumerate(self.data.all_words)}
+        self.bow_pos = {x: i +1 for i, x in enumerate(self.data.all_pos)}
+        self.bow_features = {x: i +1 for i, x in enumerate(self.data.all_features)}
+        print(self.bow_features)
+
+
+    def _bag_of_words_rel_cache_init(self):
+        self.bow_rel = {x: i +1 for i, x in enumerate(self.data.all_rel)}
+
+    def _sentence_cache_init(self):
+        for i in self.data.tokens:
+            sen=i['sentence']
+            if sen not in self.sentence_tokens_cache:
+                self.sentence_tokens_cache[sen]=[]
+            self.sentence_tokens_cache[sen].append(i)
+        self.sentence_len_cache=[len(self.sentence_tokens_cache[x]) for x in self.sentence_tokens_cache]
+
+    def _clear_cache(self):
+        self.sentence_len_cache=[]
+        self.sentence_tokens_cache={}
+        self.bow_words={} #word:idx
+        self.bow_pos={} #pos:idx
+        self.bow_features={} #feature:idx kn all_features
+        self.bow_rel={}
+
     def load_data(self,fp):
         self.data.compute(fp)
+        self._sentence_cache_init()
+        self._bag_of_words_cache_init()
+        self._bag_of_words_rel_cache_init()
 
     def _find_w2(self,word):
-        sentence_n=word['sentence']
         w2_id=word['head']
-        if w2_id==0:
-            return None
-
-        for w in self.data.tokens:
-            if w['sentence']==sentence_n and w['no_in_sentence']==w2_id:
-                return w
-
-        return None
+        sen=word['sentence']
+        return [x for x in self.sentence_tokens_cache[sen] if x['no_in_sentence']==w2_id][0]
 
     def _encode_word(self,word:str):
         if self.use_bert:
@@ -76,7 +123,7 @@ class SynTagRusBinarizer(Binarizer):
             self.word_no+=1
             return [self.word_no]
         
-        return [self._bag_of_words_item(word,self.data.all_words,self.normalize)]
+        return [self._bag_of_words_item(word,self.bow_words,self.normalize)]
 
     def _encode_discr(self,elem,all_elems):
         if self.one_hot:
@@ -85,36 +132,26 @@ class SynTagRusBinarizer(Binarizer):
 
     def _pair_word(self,w1,w2):
         w1_emb=self._encode_word(w1['word'])
-        w1_emb=torch.Tensor(w1_emb)
-        w2_emb=torch.zeros(w1_emb.shape)
-        if w2:
-            w2_emb=self._encode_word(w2['word'])
-            w2_emb=torch.Tensor(w2_emb)
-        else:
-            w2_emb=None
+        w2_emb=self._encode_word(w2['word'])
         return [w1_emb,w2_emb]
 
     def _pair_pos(self,w1,w2):
-        w1_pos=self._encode_discr(w1['pos'],self.data.all_pos)
+        w1_pos=self._encode_discr(w1['pos'],self.bow_pos)
         w2_pos=[0]*len(w1_pos)
         if w2:
-            w2_pos=self._encode_discr(w2['pos'],self.data.all_pos)
+            w2_pos=self._encode_discr(w2['pos'],self.bow_pos)
         return [w1_pos,w2_pos]
 
     def _pair_morph(self,w1,w2):
-        w1_morph=self.vectorize_features(w1['features'],self.data.all_features,normalize=self.normalize,hot=self.one_hot)
+        w1_morph=self.vectorize_features(w1['features'],self.bow_features,normalize=self.normalize,hot=self.one_hot)
         w2_morph=[0]*len(w1_morph)
         if w2:
-            w2_morph=self.vectorize_features(w2['features'],self.data.all_features,normalize=self.normalize,hot=self.one_hot)
+            w2_morph=self.vectorize_features(w2['features'],self.bow_features,normalize=self.normalize,hot=self.one_hot)
         return [w1_morph,w2_morph]
 
-    def _get_len_sentence(self,sentence_id):
-        words=[]
-        for token in self.data.tokens:
-            if token['sentence']==sentence_id:
-                words.append(token['no_in_sentence'])
 
-        return max(words)
+    def _get_len_sentence(self,sentence_id):
+        return self.sentence_len_cache[sentence_id]
 
     def _get_sentence_n(self,w1,w2):
         w1_no=w1['no_in_sentence']
@@ -192,8 +229,8 @@ class SynTagRusBinarizer(Binarizer):
     def generate_target(self,chunk):
         rel=chunk['relation']
         if self.vec_result:
-            return self._one_hot(rel,self.data.all_rel)
-        rel=self._bag_of_words_item(rel,self.data.all_rel,normalize=self.normalize)
+            return self._one_hot(rel,self.bow_rel)
+        rel=self._bag_of_words_item(rel,self.bow_rel,normalize=self.normalize)
         if self.binary:
             if rel!=0:
                 rel=1
@@ -203,16 +240,24 @@ class SynTagRusBinarizer(Binarizer):
 
         if self.use_bert:
             self._init_bert()
+        
+        c=0
+
+        non_root=len([x for x in self.data.tokens if x['head']!=0])
 
         for t in self.data.tokens:
             if t['head']!=0:
                 self.sources.append(self.generate_source(t))
                 self.targets.append(self.generate_target(t))
+                c+=1
+            if c%1000==0:
+                print(c,non_root)
         curr_w=0
         curr_s=0
 
         if self.use_bert:
             word_bert=self._decode_bert(self.words)
+            #print(len(word_bert))
             if self.use_sentenceemb:
                 sen_bert=self._decode_bert(self.sentences)
 
@@ -246,15 +291,14 @@ class SynTagRusBinarizer(Binarizer):
         result=[]
 
         for sample in range(gen_n):
-            random_s=random.randint(0,number-1)
-            word=self.data.tokens[random_s]
+            random_sample=random.randint(0,len(self.data.tokens)-1)
+            word=self.data.tokens[random_sample]
             sentence_n=word['sentence']
             curr_rel=word['head']
-            all_tokens_no_rel=[]
 
-            for t in self.data.tokens:
-                if t['sentence']==sentence_n and t['head']!=curr_rel:
-                    all_tokens_no_rel.append(t)
+            all_tokens_no_rel=[x for x in self.sentence_tokens_cache[sentence_n] if x!=word]
+
+            #print(all_tokens_no_rel)
             generate_n=random.randint(0,len(all_tokens_no_rel)-1)
             new_token=copy.deepcopy(word)
             new_token['head']=all_tokens_no_rel[generate_n]['no_in_sentence']
@@ -301,15 +345,15 @@ class SynTagRusBinarizer(Binarizer):
         result=[]
 
         for sample in range(gen_n):
-            random_s=random.randint(0,number-1)
-            new_s,new_t=copy.deepcopy(self.sources[random_s]),copy.deepcopy(self.targets[random_s])
+            random_sample=random.randint(0,number-1)
+            new_s,new_t=copy.deepcopy(self.sources[random_sample]),copy.deepcopy(self.targets[random_sample])
             new_s,new_t=self._gen_neg_head_one(new_s,new_t)
             self.sources.append(new_s)
             self.targets.append(new_t)
 
     @staticmethod
     def _flat4dist(l):
-        l=SynTagRusBinarizer._glue_all(l) #tensor
+        l=SynTagRusBinarizer._glue_all(l) #NP
         return l.tolist()
 
     @staticmethod
@@ -327,7 +371,7 @@ class SynTagRusBinarizer(Binarizer):
         minor_classes=[]
         counts={}
         was_list=False
-
+        #print(self.targets)
         for sample in self.targets:
             key=sample
             if (isinstance(key,list)):
@@ -385,8 +429,8 @@ class SynTagRusBinarizer(Binarizer):
         self.generate_negative_data(neg_ratio)
         self.gen_dataset()
         self._pack_scheme()
+        self._clear_cache()
         head_var= self.use_head or self.predict_head
-
         if head_var:
             self.generate_negative_head(neg_ratio)
         if do_shuffle:
@@ -401,8 +445,8 @@ class SynTagRusBinarizer(Binarizer):
         if self.predict_head:
             self._transfer_head()
         for i in range(len(self.sources)):
-            self.sources[i]=self._glue_all(self.sources[i]).numpy()
-            self.targets[i]=torch.Tensor(self.targets[i]).numpy()
+            self.sources[i]=self._glue_all(self.sources[i])
+            self.targets[i]=np.array(self.targets[i])
 
     def _select_w_classes(self,classes_):
         result_s=[]
@@ -507,15 +551,18 @@ class SynTagRusBinarizer(Binarizer):
 
         self.load_data(fp)
         self.generate_dataset_unbalanced()
+        print('generated unbalanced')
         subsets=self.split_datasets(n)
         for d in range(len(subsets)):
             subsets[d].balance_dataset(dist=dist,nm_k=nm_k,tl_delta=tl_delta)
             subsets[d]._finalize_dataset()
             subsets[d].save(f"{save_dir}/data_{d}.pt")
-        self.export_scheme(f"{save_dir}/scheme.json")
+        self.export_scheme(f'{save_dir}/scheme.json')
 
     
         
 if __name__=='__main__':
-    b=SynTagRusBinarizer(use_bert=True,batch_size=64,vec_result=True,use_sentenceemb=True,predict_head=True,use_head=False)
-    b.make_datasets_from_file('dataset/ru_syntagrus-ud-train-a.conllu',save_dir='train_a')
+    b=SynTagRusBinarizer(use_bert=False,batch_size=64,vec_result=True,use_sentenceemb=False,predict_head=True)
+    b.make_datasets_from_file('dataset/slice.conllu',save_dir='slice_data')
+    #dataset/ru_syntagrus-ud-train-a.conllu
+    #b.make_datasets_from_file('dataset/ru_syntagrus-ud-train-a.conllu',save_dir='train_a')
