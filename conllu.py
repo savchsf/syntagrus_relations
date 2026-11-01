@@ -85,14 +85,15 @@ class ConlluDataset:
 
     def compute(self,fp):
         self._parse_file(fp)
+        self.reinit()
 
+    def reinit(self):
         self._find_all_features()
         self._sort_dict_of_lists(self.all_features)
 
         self.all_words=self._sorted_key(self.tokens,'word')
         self.all_pos=self._sorted_key(self.tokens,'pos')
         self.all_rel=self._sorted_key(self.tokens,'relation')
-
 
 '''d=ConlluDataset()
 d.compute('dataset/ru_syntagrus-ud-test.conllu')

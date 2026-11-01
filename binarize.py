@@ -1,6 +1,7 @@
 import torch
 from transformers import BertTokenizer, BertModel
 import numpy as np
+import gc
 
 class Binarizer:
 
@@ -20,6 +21,16 @@ class Binarizer:
             self.model = BertModel.from_pretrained(self.bert_name)
         
         self.model.eval()
+
+    def _unload_bert(self):
+        if self.model:
+            del self.model
+        if self.tokenizer:
+            del self.tokenizer
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _bag_of_words_item(self,item,whole_list,normalize=True,cached=True):
         if item not in whole_list:
@@ -76,6 +87,11 @@ class Binarizer:
 
     def _chunks(self,lst,n):
         return [lst[i:i + n] for i in range(0, len(lst), n)]
+
+    def deserialize_one_hot(self,vector):
+        if np.sum(vector)==0:
+            return 0
+        return np.argmax(vector)+1
 
     def _bert_batch_words(self,words:list):
         inputs = self.tokenizer(words, return_tensors='pt',padding=True)

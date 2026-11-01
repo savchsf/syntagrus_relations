@@ -4,29 +4,25 @@ import torch
 
 import math
 import random
-
-from balance import Balance, Distance
 import copy
-
 import json
-
 import os
-
 import numpy as np
+from collections import Counter
 
 class SynTagRusBinarizer(Binarizer):
-    def __init__(self,use_bert=True,bert_name='sergeyzh/rubert-large-uncased-sts',normalize=True,
-    vec_result=True, one_hot=True,batch_size=32,unk_token='_',
+    def __init__(self,use_bert=True,bert_name='sergeyzh/rubert-large-uncased-sts',
+    batch_size=32,unk_token='_',
     use_head=True, predict_head=True, use_pos=True, use_morph=True,
-    use_sentenceemb=True, use_s_no=True, use_distance=True,binary=False
+    use_sentenceemb=True, use_s_no=True, use_distance=True, binary=False
     ):
+        #новая стратегия: все признаки всегда кодируются как one_hot. Голова всегда последняя.abs
+        #переброс головы случится после балансировки, которая проводится перед тренировкой в отдельном файле (и для сурсов, и для таргетов)
         super().__init__(use_bert,bert_name)
         self.sources=[]
         self.targets=[]
         self.data=ConlluDataset()
         self.use_bert=use_bert
-        self.normalize=normalize
-        self.one_hot=one_hot
 
         self.word_no=-1
         self.sen_no=-1
@@ -39,9 +35,6 @@ class SynTagRusBinarizer(Binarizer):
 
         self.batch_size=batch_size
 
-        self.head_idx=None
-        self.vec_result=vec_result
-
         self.bert_size=None
 
         #dataset_generation
@@ -52,8 +45,9 @@ class SynTagRusBinarizer(Binarizer):
         self.use_sentenceemb=use_sentenceemb
         self.use_s_no=use_s_no
         self.use_distance=use_distance
-
         self.binary=binary
+
+        self.sentence_emb_idx=None
 
         self.scheme=dict()
 
@@ -68,13 +62,6 @@ class SynTagRusBinarizer(Binarizer):
         #delete encode_discr
         self.bow_rel={} #rel:idx
 
-        #to do: find shifted head_idx (convert to np.array on the go, not in the end)
-        #optimize balance
-        #cache scaled and unscaled vectors
-        #remove flatten (pt. 1)
-        #parallel balance
-        #check idxs
-
     def _bag_of_words_cache_init(self):
         '''
         self.bow_words={} #word:idx
@@ -84,7 +71,7 @@ class SynTagRusBinarizer(Binarizer):
         self.bow_words = {x: i +1 for i, x in enumerate(self.data.all_words)}
         self.bow_pos = {x: i +1 for i, x in enumerate(self.data.all_pos)}
         self.bow_features = {x: i +1 for i, x in enumerate(self.data.all_features)}
-        print(self.bow_features)
+        #print(self.bow_features)
 
 
     def _bag_of_words_rel_cache_init(self):
@@ -106,7 +93,13 @@ class SynTagRusBinarizer(Binarizer):
         self.bow_features={} #feature:idx kn all_features
         self.bow_rel={}
 
-    def load_data(self,fp):
+    def load_data(self,data):
+        self.data=data
+        self._sentence_cache_init()
+        self._bag_of_words_cache_init()
+        self._bag_of_words_rel_cache_init()
+
+    def load_data_from_file(self,fp):
         self.data.compute(fp)
         self._sentence_cache_init()
         self._bag_of_words_cache_init()
@@ -121,33 +114,26 @@ class SynTagRusBinarizer(Binarizer):
         if self.use_bert:
             self.words.append(word)
             self.word_no+=1
-            return [self.word_no]
-        
-        return [self._bag_of_words_item(word,self.bow_words,self.normalize)]
+            return self.word_no
+        return self._bag_of_words_item(word,self.bow_words)
 
-    def _encode_discr(self,elem,all_elems):
-        if self.one_hot:
-            return self._one_hot(elem,all_elems)
-        return [self._bag_of_words_item(elem,all_elems)]
+    '''def _encode_discr(self,elem,all_elems):
+        return self._one_hot(elem,all_elems)'''
 
     def _pair_word(self,w1,w2):
         w1_emb=self._encode_word(w1['word'])
         w2_emb=self._encode_word(w2['word'])
-        return [w1_emb,w2_emb]
+        return [np.array([w1_emb]),np.array([w2_emb])]
 
     def _pair_pos(self,w1,w2):
-        w1_pos=self._encode_discr(w1['pos'],self.bow_pos)
-        w2_pos=[0]*len(w1_pos)
-        if w2:
-            w2_pos=self._encode_discr(w2['pos'],self.bow_pos)
-        return [w1_pos,w2_pos]
+        w1_pos=self._one_hot(w1['pos'],self.bow_pos)
+        w2_pos=self._one_hot(w2['pos'],self.bow_pos)
+        return [np.array(w1_pos),np.array(w2_pos)]
 
     def _pair_morph(self,w1,w2):
-        w1_morph=self.vectorize_features(w1['features'],self.bow_features,normalize=self.normalize,hot=self.one_hot)
-        w2_morph=[0]*len(w1_morph)
-        if w2:
-            w2_morph=self.vectorize_features(w2['features'],self.bow_features,normalize=self.normalize,hot=self.one_hot)
-        return [w1_morph,w2_morph]
+        w1_morph=self.vectorize_features(w1['features'],self.bow_features)
+        w2_morph=self.vectorize_features(w2['features'],self.bow_features)
+        return [np.array(w1_morph),np.array(w2_morph)]
 
 
     def _get_len_sentence(self,sentence_id):
@@ -155,26 +141,16 @@ class SynTagRusBinarizer(Binarizer):
 
     def _get_sentence_n(self,w1,w2):
         w1_no=w1['no_in_sentence']
-        w2_no=0
-        if w2:
-            w2_no=w2['no_in_sentence']
-
-        if self.normalize:
-            lsent=self._get_len_sentence(w1['sentence'])
-            w1_no=w1_no/lsent
-            w2_no=w2_no/lsent
-
-
+        w2_no=w2['no_in_sentence']
         return w1_no, w2_no
 
     def _encode_sentence(self,sentence):
         self.sentences.append(sentence)
         self.sen_no+=1
-        return self.sen_no
+        return [np.array([self.sen_no])]
 
     def _decode_bert(self,lst):
         return self.bert_batch(lst,batch_size=self.batch_size)
-
 
     def generate_source(self,w1
         ):
@@ -193,85 +169,192 @@ class SynTagRusBinarizer(Binarizer):
         w2_no *
         distance *
         '''
-        #chunk=d.tokens[i]
+
         result=[]
         w2=self._find_w2(w1)
-
         w1_no,w2_no=self._get_sentence_n(w1,w2)
-        result.extend(self._pair_word(w1,w2))
+        #_pair_word
+        result.extend(self._pair_word(w1,w2)) #[arr(132),arr(42)]
 
         if self.use_pos:
-            result.extend(self._pair_pos(w1,w2))
+            result.extend(self._pair_pos(w1,w2)) #[arr(132),arr(42), arr, arr]
+
         if self.use_morph:
-            result.extend(self._pair_morph(w1,w2))
+            result.extend(self._pair_morph(w1,w2)) #[arr(132),arr(42), arr, arr, arr, arr6]
+
         if self.use_sentenceemb:
+
             if not self.use_bert:
                 raise Exception("Enable bert first")
 
-            
             sentence=self.data.sentences[w1['sentence']]
-            result.append(self._encode_sentence(sentence))
-            self.s_idx=len(result)-1
-        
-        if self.use_head:
-            result.append([1])
-            self.head_idx=len(result)-1
+            result.extend(self._encode_sentence(sentence)) #[arr(1),arr(2), arr3, arr4, arr5, arr6, arr7]
 
-        if self.use_s_no:
-            result.extend([[w1_no],[w2_no]])
+            self.sentence_emb_idx=len(result)-1 #!!!!!!!!
+
+        if self.use_s_no: #no in sentence
+            result.extend([np.array([w1_no]), np.array([w2_no])]) #[arr(1),arr(2), arr3, arr4, arr5, arr6, arr7, arr8, arr9]
+
         if self.use_distance:
-            result.append([abs(w1_no-w2_no)])
+            result.extend([np.array([abs(w1_no-w2_no)])]) #[arr9, arr10,arr11]
 
-        return result
+        if self.use_head or self.predict_head: 
+            result.extend([np.array([1])])  #[arr9, arr10,arr11, arr12]
 
+        return result #python list of np arrays -> [np.arr(1),np.arr(2),np.arr(7),....]
 
 
     def generate_target(self,chunk):
         rel=chunk['relation']
-        if self.vec_result:
-            return self._one_hot(rel,self.bow_rel)
-        rel=self._bag_of_words_item(rel,self.bow_rel,normalize=self.normalize)
         if self.binary:
+            rel=self._bag_of_words_item(rel,self.bow_rel)
             if rel!=0:
                 rel=1
-        return rel
+            return np.array([rel])
+        return np.array(self._one_hot(rel,self.bow_rel))
+        #singular np.array
 
-    def gen_dataset(self):
+    def return_bert(self):
+        curr_w=-1
+        curr_s=-1
+        word_bert=self._decode_bert(self.words)
+        if self.bert_size is None:
+            self.bert_size=len(word_bert[0])
+        #print(len(self.sources))
+        if self.use_sentenceemb:
+            sen_bert=self._decode_bert(self.sentences)
 
+        for i in range(len(self.sources)):
+            curr_w+=1
+            #w1
+            #print(curr_w)
+            self.sources[i][0]=word_bert[curr_w]
+            curr_w+=1
+            #w2
+            self.sources[i][1]=word_bert[curr_w]
+
+            if self.use_sentenceemb:
+                curr_s+=1
+                self.sources[i][self.sentence_emb_idx]=sen_bert[curr_s]
+    
+
+    def _flatten_all(self):
+        for i in range(len(self.sources)):
+            #print(self.sources[i][0])
+            #print(self.sources[i][2])
+            self.sources[i]=np.concatenate(self.sources[i])
+
+
+    #------ГЕНЕРАЦИЯ НЕГАТИВНЫХ ПРИМЕРОВ------
+
+    def _GFOWIS(self,token):
+        new_token=copy.deepcopy(token)
+
+        sentence_n=new_token['sentence']
+        new_token['rel']=self.unk_token
+
+        #select
+        others=[x for x in self.sentence_tokens_cache[sentence_n] if x!=token]
+        other_one=random.choice(others)
+
+        new_token['head']=other_one['no_in_sentence']
+
+        return new_token
+
+    def generate_from_other_words_in_sentence(self,ratio=0.5):
+        #этот работает с данными из парсера
+        n_new=math.ceil(len(self.data.tokens)*ratio)
+        selected_tokens=random.sample(self.data.tokens,k=n_new)
+
+        new_tokens=[self._GFOWIS(x) for x in selected_tokens]
+
+        self.data.tokens.extend(new_tokens)
+
+    def _one_negative_head(self,s,t):
+        new_source=copy.deepcopy(s)
+        new_source[-1]=(new_source[-1]+1)%2
+        new_target=np.zeros(len(t))
+        return new_source, new_target
+
+    def generate_negative_heads(self,ratio=0.5):
+        #работает со списками из np.array
+        n_new=math.ceil(len(self.data.tokens)*ratio)
+        selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
+        res_s=[]
+        res_t=[]
+        for i in selected_indices:
+            cs,ct=self._one_negative_head(self.sources[i],self.targets[i])
+            res_s.append(cs)
+            res_t.append(ct)
+        self.sources.extend(res_s)
+        self.targets.extend(res_t)
+
+    #------SHUFFLE------
+
+    def shuffle_data(self):
+        #со списками из np.array
+        combinations=list(zip(self.sources, self.targets))
+        random.shuffle(combinations)
+        self.sources[:],self.targets[:]=zip(*combinations)
+
+    def _invert_head(self,s,t):
+        new_s=copy.deepcopy(s)
+        new_t=copy.deepcopy(t)
+        new_s[0],new_s[1]=new_s[1],new_s[0]
+        new_s[-1]=(new_s[-1]+1)%2
+        return new_s,new_t
+
+    def shuffle_head(self,ratio=0.5):
+        #со списками из np.array
+        n_new=math.ceil(len(self.targets)*ratio)
+        selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
+        res_s=[]
+        res_t=[]
+        for i in selected_indices:
+            cs,ct=self._invert_head(self.sources[i],self.targets[i])
+            res_s.append(cs)
+            res_t.append(ct)
+        self.sources.extend(res_s)
+        self.targets.extend(res_t)
+
+    def generate_dataset(self,ratio=0.3,do_shuffle=True): #head still not
         if self.use_bert:
             self._init_bert()
+
+        if (self.use_head or self.predict_head) and self.use_sentenceemb:
+            ratio=ratio/2
+
+        if self.use_sentenceemb:
+            self.generate_from_other_words_in_sentence(ratio)
         
         c=0
-
         non_root=len([x for x in self.data.tokens if x['head']!=0])
 
         for t in self.data.tokens:
-            if t['head']!=0:
+            if t['head']!=0 and (t['relation'] in self.data.all_rel or t['relation']==self.unk_token):
                 self.sources.append(self.generate_source(t))
                 self.targets.append(self.generate_target(t))
                 c+=1
             if c%1000==0:
                 print(c,non_root)
-        curr_w=0
-        curr_s=0
+
+        
 
         if self.use_bert:
-            word_bert=self._decode_bert(self.words)
-            #print(len(word_bert))
-            if self.use_sentenceemb:
-                sen_bert=self._decode_bert(self.sentences)
+            self.return_bert()
+            self._unload_bert()
 
-            for i in range(len(self.sources)):
-                self.sources[i][0]=word_bert[curr_w]
-                if self.bert_size is None:
-                    self.bert_size=len(self.sources[i][0])
-                curr_w+=1
-                self.sources[i][1]=word_bert[curr_w]
-                curr_w+=1
+        if self.use_head or self.predict_head:
+            self.generate_negative_heads(ratio)
 
-                if self.use_sentenceemb:
-                    self.sources[i][self.s_idx]=sen_bert[curr_s]
-                    curr_s+=1
+        if do_shuffle:
+            self.shuffle_data()
+            if self.use_head or self.predict_head:
+                self.shuffle_head()
+
+        self._flatten_all()
+        self.sources=np.asarray(self.sources)
+        self.targets=np.asarray(self.targets)
 
     def save(self,path): 
         export_data={
@@ -285,208 +368,7 @@ class SynTagRusBinarizer(Binarizer):
         self.sources=loaded_data['sources']
         self.targets=loaded_data['targets']
 
-    def generate_negative_data(self,ratio):
-        number=len(self.data.tokens)
-        gen_n=math.ceil(number*ratio)
-        result=[]
 
-        for sample in range(gen_n):
-            random_sample=random.randint(0,len(self.data.tokens)-1)
-            word=self.data.tokens[random_sample]
-            sentence_n=word['sentence']
-            curr_rel=word['head']
-
-            all_tokens_no_rel=[x for x in self.sentence_tokens_cache[sentence_n] if x!=word]
-
-            #print(all_tokens_no_rel)
-            generate_n=random.randint(0,len(all_tokens_no_rel)-1)
-            new_token=copy.deepcopy(word)
-            new_token['head']=all_tokens_no_rel[generate_n]['no_in_sentence']
-            new_token['relation']=self.unk_token
-            result.append(new_token)
-
-        self.data.tokens.extend(result)
-
-    def _shuffle_head_one(self,sample):
-        if self.head_idx:
-            sample[0],sample[1]=sample[1],sample[0]
-            sample[self.head_idx]=[(sample[self.head_idx][0]+1)%2]
-        return sample
-    
-    def shuffle_head(self,chance=0):
-        for i in range(len(self.sources)):
-            r=random.random()
-            if r<chance:
-                self.sources[i]=self._shuffle_head_one(self.sources[i])
-
-    def shuffle_data(self):
-        indices=list(range(len(self.targets)))
-        random.shuffle(indices)
-        new_s, new_t= [],[]
-        for i in indices:
-            new_s.append(self.sources[i])
-            new_t.append(self.targets[i])
-        self.sources=new_s
-        self.targets=new_t
-
-    def _gen_neg_head_one(self,sample,tsample):
-        if self.head_idx:
-            sample[self.head_idx]=[(sample[self.head_idx][0]+1)%2]
-            if isinstance(tsample,list):
-                tsample=[0]*len(tsample)
-            else:
-                tsample=0
-        return sample,tsample
-
-
-    def generate_negative_head(self,ratio):
-        number=len(self.targets)
-        gen_n=math.ceil(number*ratio)
-        result=[]
-
-        for sample in range(gen_n):
-            random_sample=random.randint(0,number-1)
-            new_s,new_t=copy.deepcopy(self.sources[random_sample]),copy.deepcopy(self.targets[random_sample])
-            new_s,new_t=self._gen_neg_head_one(new_s,new_t)
-            self.sources.append(new_s)
-            self.targets.append(new_t)
-
-    @staticmethod
-    def _flat4dist(l):
-        l=SynTagRusBinarizer._glue_all(l) #NP
-        return l.tolist()
-
-    @staticmethod
-    def _scaler_norm(l):
-        mu=(sum(l))/(len(l))
-        sigma=0
-        for i in l:
-            sigma+=(i-mu)**2
-        sigma=(sigma/len(l))**0.5
-        return [(x-mu)/sigma for x in l]
-
-
-    def get_major_minor_classes(self):
-        major_classes=[]
-        minor_classes=[]
-        counts={}
-        was_list=False
-        #print(self.targets)
-        for sample in self.targets:
-            key=sample
-            if (isinstance(key,list)):
-                key=tuple(key)
-                was_list=True
-            #print(key)
-            if key not in counts:
-                counts[key]=0
-            counts[key]+=1
-
-        equal_percent=1/len(counts)
-        n=len(self.targets)
-        
-        for class_, count in counts.items():
-            var=count/n
-            if was_list:
-                class_=list(class_)
-            if var>=equal_percent:
-                major_classes.append(class_)
-            else:
-                minor_classes.append(class_)
-        
-        major_classes.sort()
-        minor_classes.sort()
-
-        return major_classes, minor_classes
-
-    def balance_dataset(self,dist=Distance.Euclidean,nm_k=3,tl_delta=0.2):
-        major_classes,minor_classes=self.get_major_minor_classes()
-        balance_instance=Balance(self.sources,self.targets,self._flat4dist,self._scaler_norm)
-
-        for minor in minor_classes:
-            for major in major_classes:
-                balance_instance.NearMiss3(major,minor,dist,nm_k)
-                balance_instance.TomekLinks(major,minor,dist,tl_delta)
-
-        self.sources=balance_instance.sources
-        self.targets=balance_instance.targets
-        print("Balanced the dataset")
-
-    def _transfer_head(self):
-        for i in range(len(self.sources)): #перекидывание головы
-            head_param=self.sources[i][self.head_idx][0]
-            self.sources[i]=list(self.sources[i])
-            self.sources[i].pop(self.head_idx)
-            if self.vec_result:
-                self.targets[i].append(head_param)
-            else:
-                self.targets[i]=[self.targets[i],head_param]
-
-
-    def generate_dataset_unbalanced(self,do_shuffle=True,neg_ratio=0.3):
-        if self.use_head or self.predict_head:
-            neg_ratio/=2
-        self.generate_negative_data(neg_ratio)
-        self.gen_dataset()
-        self._pack_scheme()
-        self._clear_cache()
-        head_var= self.use_head or self.predict_head
-        if head_var:
-            self.generate_negative_head(neg_ratio)
-        if do_shuffle:
-            if head_var:
-                self.shuffle_head(chance=0.5)
-
-            self.shuffle_data()
-
-        print("Generated unbalanced dataset")
-
-    def _finalize_dataset(self):
-        if self.predict_head:
-            self._transfer_head()
-        for i in range(len(self.sources)):
-            self.sources[i]=self._glue_all(self.sources[i])
-            self.targets[i]=np.array(self.targets[i])
-
-    def _select_w_classes(self,classes_):
-        result_s=[]
-        result_t=[]
-        for i in range(len(self.targets)):
-            in_class=False
-            for j in classes_:
-                if self.targets[i]==j:
-                    in_class=True
-                    break
-            if in_class:
-                result_s.append(self.sources[i])
-                result_t.append(self.targets[i])
-        ds=SynTagRusBinarizer(use_bert=self.use_bert,bert_name=self.bert_name,normalize=self.normalize,
-                            vec_result=self.vec_result, one_hot=self.one_hot,batch_size=self.batch_size,unk_token=self.unk_token,
-                            use_head=self.use_head, predict_head=self.predict_head, use_pos=self.use_pos, use_morph=self.use_morph,
-                            use_sentenceemb=self.use_sentenceemb, use_s_no=self.use_s_no, use_distance=self.use_distance,binary=self.binary)
-
-        ds.sources=result_s
-        ds.targets=result_t
-        ds.head_idx=self.head_idx
-
-        return ds
-
-    def _split_dataset_by_two(self):
-        major,minor=self.get_major_minor_classes()
-        dataset1=self._select_w_classes(major)
-        dataset2=self._select_w_classes(minor)
-        return [dataset1,dataset2]
-
-    def split_datasets(self,n):
-        if n==1:
-            return [self]
-        if n==2:
-            return self._split_dataset_by_two()
-        else:
-            result=[]
-            result.extend(self.split_datasets(n//2+n%2))
-            result.extend(self.split_datasets(n//2))
-            return result
 
     def _pack_scheme(self):
         scheme={
@@ -499,9 +381,6 @@ class SynTagRusBinarizer(Binarizer):
             "binary":self.binary,
             "use_head":self.use_head,
             "predict_head":self.predict_head,
-            "vec_result":self.vec_result,
-            "normalize":self.normalize,
-            "one_hot":self.one_hot,
             "unk_token":self.unk_token
         }
 
@@ -512,57 +391,85 @@ class SynTagRusBinarizer(Binarizer):
         scheme["outputs"]=dict()
         all_rel=[self.unk_token]+self.data.all_rel
         if not self.binary:
-            if self.vec_result:
-                for i in range(len(all_rel)-1):
-                    scheme["outputs"][i]=self.data.all_rel[i]
-            else:
-                for i in range(len(all_rel)):
-                    scheme["outputs"][i/len(all_rel)]=all_rel[i]
+            for i in range(len(all_rel)-1):
+                scheme["outputs"][i]=self.data.all_rel[i]
 
         self.scheme=scheme
 
     def export_scheme(self,path):
         with open(path,'w',encoding='utf-8') as f:
             json.dump(self.scheme,f,indent=4)
+'''
+def split_major_minor(n,classes_):
+    majors=[]
+    minors=[]
+    counts=dict(Counter(classes_))
 
-    def interpret_result(self,vector):
-        result={"relation":''}
-        if self.predict_head:
-            result['head']=vector[-1]
-            vector=vector[:-1]
-        if self.vec_result:
-            idx=None
-            for i in range(len(vector)):
-                if vector[i]!=0:
-                    idx=i
-            if idx is not None:
-                result["relation"]=self.scheme['outputs'][idx]
-            else:
-                result["relation"]=self.unk_token
-        else:
-            result["relation"]=self.scheme['outputs'][vector[0]] #or closest to it...?
-        return result
-
-    def make_datasets_from_file(self,fp,n=2,save_dir='.',
-                                dist=Distance.Euclidean, nm_k=3, tl_delta=0.3):
-
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-
-        self.load_data(fp)
-        self.generate_dataset_unbalanced()
-        print('generated unbalanced')
-        subsets=self.split_datasets(n)
-        for d in range(len(subsets)):
-            subsets[d].balance_dataset(dist=dist,nm_k=nm_k,tl_delta=tl_delta)
-            subsets[d]._finalize_dataset()
-            subsets[d].save(f"{save_dir}/data_{d}.pt")
-        self.export_scheme(f'{save_dir}/scheme.json')
-
-    
+    equal_percent=1/len(counts)
         
+    for class_, count in counts.items():
+        var=count/n
+        if var>=equal_percent:
+            majors.append(class_)
+        else:
+            minors.append(class_)
+        
+    majors.sort()
+    minors.sort()
+
+    return majors, minors
+
+
+def select_w_classes(data_p,classes_):
+    #data tokens
+    data=copy.deepcopy(data_p)
+    data.tokens=[x for x in data.tokens if x['relation'] in classes_]
+    data.reinit()
+    data.tokens=copy.deepcopy(data_p.tokens)
+    return data
+
+def split_two(data,relations):
+    rels=[x['relation'] for x in data.tokens]
+    rels=[x for x in rels if x in relations]
+    majors,minors=split_major_minor(len(rels),rels)
+    return [select_w_classes(data,majors), select_w_classes(data,minors)]
+
+def split_n(data,n):
+    data_n=[]
+    if n<=1:
+        return [data]
+    if n==2:
+        return split_two(data,data.all_rel)
+    else:
+        data_2=split_two(data,data.all_rel) #major, minor
+        data_n.extend(split_n(data_2[0],n//2+n%2))
+        data_n.extend(split_n(data_2[1],n//2))
+        return data_n
+
+def make_multiple_datasets(fp,dataset_configuration,n=3):
+    data=ConlluDataset()
+    data.compute(fp)
+    data_n=split_n(data,n)
+    datasets=[]
+    for data_pack in data_n:
+        dataset=copy.deepcopy(dataset_configuration)
+        dataset.load_data(data_pack)
+        dataset.generate_dataset()
+        datasets.append(dataset)
+    return datasets
+
+    '''
 if __name__=='__main__':
-    b=SynTagRusBinarizer(use_bert=False,batch_size=64,vec_result=True,use_sentenceemb=False,predict_head=True)
-    b.make_datasets_from_file('dataset/slice.conllu',save_dir='slice_data')
-    #dataset/ru_syntagrus-ud-train-a.conllu
-    #b.make_datasets_from_file('dataset/ru_syntagrus-ud-train-a.conllu',save_dir='train_a')
+    b=SynTagRusBinarizer(use_bert=True,batch_size=64,use_sentenceemb=True,predict_head=True)
+    #b.load_data('dataset/slice.conllu')
+    b.load_data_from_file('dataset/ru_syntagrus-ud-train-a.conllu')
+    b.generate_dataset()
+    '''datasets=make_multiple_datasets('dataset/ru_syntagrus-ud-train-a.conllu',b)
+    c=1
+    for d in datasets:
+        d._pack_scheme()
+        d.export_scheme(f'test/{c}.json')
+        d.save(f'test/{c}.pt')
+        print(len(d.targets))
+        print(len(d.targets[0]))
+        c+=1'''
