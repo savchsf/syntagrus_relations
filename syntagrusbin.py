@@ -14,7 +14,7 @@ class SynTagRusBinarizer(Binarizer):
     def __init__(self,use_bert=True,bert_name='sergeyzh/rubert-large-uncased-sts',
     batch_size=32,unk_token='_',
     use_head=True, predict_head=True, use_pos=True, use_morph=True,
-    use_sentenceemb=True, use_s_no=True, use_distance=True, binary=False
+    use_sentenceemb=True, use_s_no=True, use_distance=True, binary=False,sentence_batch=4
     ):
         #новая стратегия: все признаки всегда кодируются как one_hot. Голова всегда последняя.abs
         #переброс головы случится после балансировки, которая проводится перед тренировкой в отдельном файле (и для сурсов, и для таргетов)
@@ -34,8 +34,6 @@ class SynTagRusBinarizer(Binarizer):
         self.unk_token=unk_token
 
         self.batch_size=batch_size
-
-        self.bert_size=None
 
         #dataset_generation
         self.use_head=use_head
@@ -62,20 +60,31 @@ class SynTagRusBinarizer(Binarizer):
         #delete encode_discr
         self.bow_rel={} #rel:idx
 
+        #alls:
+
+        self.all_features={}
+        self.all_words=[]
+        self.all_pos=[]
+        self.all_rel=[]
+
+        self.sentence_batch=sentence_batch
+
+
+
     def _bag_of_words_cache_init(self):
         '''
         self.bow_words={} #word:idx
         self.bow_pos={} #pos:idx
         self.bow_features={}
         '''
-        self.bow_words = {x: i +1 for i, x in enumerate(self.data.all_words)}
-        self.bow_pos = {x: i +1 for i, x in enumerate(self.data.all_pos)}
-        self.bow_features = {x: i +1 for i, x in enumerate(self.data.all_features)}
+        self.bow_words = {x: i +1 for i, x in enumerate(self.all_words)}
+        self.bow_pos = {x: i +1 for i, x in enumerate(self.all_pos)}
+        self.bow_features = {x: i +1 for i, x in enumerate(self.all_features)}
         #print(self.bow_features)
 
 
     def _bag_of_words_rel_cache_init(self):
-        self.bow_rel = {x: i +1 for i, x in enumerate(self.data.all_rel)}
+        self.bow_rel = {x: i +1 for i, x in enumerate(self.all_rel)}
 
     def _sentence_cache_init(self):
         for i in self.data.tokens:
@@ -95,9 +104,20 @@ class SynTagRusBinarizer(Binarizer):
 
     def load_data(self,data):
         self.data=data
+        self._reinit()
+
+    def _reinit(self):
+        self._reinit_alls()
         self._sentence_cache_init()
         self._bag_of_words_cache_init()
         self._bag_of_words_rel_cache_init()
+        
+
+    def _reinit_alls(self):
+        self.all_features=self.data.all_features
+        self.all_words=self.data.all_words
+        self.all_pos=self.data.all_pos
+        self.all_rel=self.data.all_rel
 
     def load_data_from_file(self,fp):
         self.data.compute(fp)
@@ -149,8 +169,10 @@ class SynTagRusBinarizer(Binarizer):
         self.sen_no+=1
         return [np.array([self.sen_no])]
 
-    def _decode_bert(self,lst):
-        return self.bert_batch(lst,batch_size=self.batch_size)
+    def _decode_bert(self,lst,batch_size=None):
+        if batch_size is None:
+            batch_size=self.batch_size
+        return self.bert_batch(lst,batch_size=batch_size)
 
     def generate_source(self,w1
         ):
@@ -218,11 +240,9 @@ class SynTagRusBinarizer(Binarizer):
         curr_w=-1
         curr_s=-1
         word_bert=self._decode_bert(self.words)
-        if self.bert_size is None:
-            self.bert_size=len(word_bert[0])
         #print(len(self.sources))
         if self.use_sentenceemb:
-            sen_bert=self._decode_bert(self.sentences)
+            sen_bert=self._decode_bert(self.sentences,batch_size=self.sentence_batch)
 
         for i in range(len(self.sources)):
             curr_w+=1
@@ -278,7 +298,8 @@ class SynTagRusBinarizer(Binarizer):
 
     def generate_negative_heads(self,ratio=0.5):
         #работает со списками из np.array
-        n_new=math.ceil(len(self.data.tokens)*ratio)
+        n_new=math.ceil(len(self.targets)*ratio)
+        print(n_new)
         selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
         res_s=[]
         res_t=[]
@@ -317,8 +338,18 @@ class SynTagRusBinarizer(Binarizer):
         self.sources.extend(res_s)
         self.targets.extend(res_t)
 
+    def transfer_head_one(self,i):
+        self.targets[i] = np.concatenate((self.targets[i],np.asarray([self.sources[i][-1]])))
+        if not self.use_head:
+            self.sources[i] = self.sources[i][:-1]
+
+
+    def transfer_head(self):
+        for i in range(len(self.targets)):
+            self.transfer_head_one(i)
+
     def generate_dataset(self,ratio=0.3,do_shuffle=True): #head still not
-        if self.use_bert:
+        if self.use_bert and not self.bert_inited:
             self._init_bert()
 
         if (self.use_head or self.predict_head) and self.use_sentenceemb:
@@ -327,20 +358,20 @@ class SynTagRusBinarizer(Binarizer):
         if self.use_sentenceemb:
             self.generate_from_other_words_in_sentence(ratio)
         
-        c=0
-        non_root=len([x for x in self.data.tokens if x['head']!=0])
+        c=-1
+        non_root=len([x for x in self.data.tokens if x['head']!=0 and x['relation'] in self.all_rel])
 
         for t in self.data.tokens:
-            if t['head']!=0 and (t['relation'] in self.data.all_rel or t['relation']==self.unk_token):
+            if t['head']!=0 and (t['relation'] in self.all_rel or t['relation']==self.unk_token):
                 self.sources.append(self.generate_source(t))
                 self.targets.append(self.generate_target(t))
                 c+=1
-            if c%1000==0:
-                print(c,non_root)
+                if c%1000==0:
+                    print('Processed (no bert)',c+1,'/',non_root)
 
         
 
-        if self.use_bert:
+        if self.use_bert and self.bert_inited:
             self.return_bert()
             self._unload_bert()
 
@@ -353,6 +384,11 @@ class SynTagRusBinarizer(Binarizer):
                 self.shuffle_head()
 
         self._flatten_all()
+        self._clear_cache()
+
+        if self.predict_head:
+            self.transfer_head()
+
         self.sources=np.asarray(self.sources)
         self.targets=np.asarray(self.targets)
 
@@ -385,91 +421,125 @@ class SynTagRusBinarizer(Binarizer):
         }
 
         if self.use_bert:
-            scheme["bert_size"]=self.bert_size
             scheme["bert_name"]=self.bert_name
 
         scheme["outputs"]=dict()
-        all_rel=[self.unk_token]+self.data.all_rel
+        all_rel=[self.unk_token]+self.all_rel
         if not self.binary:
             for i in range(len(all_rel)-1):
-                scheme["outputs"][i]=self.data.all_rel[i]
+                scheme["outputs"][i]=self.all_rel[i]
+
+        scheme["all_words"]=self.all_words
+        scheme["all_pos"]=self.all_pos
+        scheme["all_rel"]=self.all_rel
+        scheme["all_features"]=self.all_features
 
         self.scheme=scheme
 
     def export_scheme(self,path):
         with open(path,'w',encoding='utf-8') as f:
             json.dump(self.scheme,f,indent=4)
-'''
-def split_major_minor(n,classes_):
-    majors=[]
-    minors=[]
-    counts=dict(Counter(classes_))
 
-    equal_percent=1/len(counts)
-        
-    for class_, count in counts.items():
-        var=count/n
-        if var>=equal_percent:
-            majors.append(class_)
+
+    #test?
+    def squeeze_result(self,target):
+        value=0
+        if self.predict_head:
+            if target[-1]>0:
+                value+=len(target)
+            target=target[:-1]
+        if np.sum(target)==0:
+            return value
+        value+=np.argmax(target)+1
+        return value
+    
+    def depickle_result(self,value):
+        if not self.binary:
+            length=len(self.all_rel)
         else:
-            minors.append(class_)
+            length=1
+        if self.predict_head:
+            length+=1
+        vector=np.zeros(length)
+        if self.predict_head:
+            if value>=length:
+                value-=length
+                vector[-1]=1
+        if value==0:
+            return vector
+        vector[value-1]=1
+        return vector
+
+class DatasetSplit:
+
+    @staticmethod
+    def split_major_minor(n,classes_,do_sort=True):
+        majors=[]
+        minors=[]
+        counts=dict(Counter(classes_))
+
+        equal_percent=1/len(counts)
+            
+        for class_, count in counts.items():
+            var=count/n
+            if var>=equal_percent:
+                majors.append(class_)
+            else:
+                minors.append(class_)
         
-    majors.sort()
-    minors.sort()
+        if do_sort:
+            majors.sort()
+            minors.sort()
 
-    return majors, minors
+        return majors, minors
+
+    @staticmethod
+    def split_n(data,rels,n,do_sort=True):
+        #возвращает маски all_rel
+        all_rels=[x['relation'] for x in data.tokens if x['relation'] in rels]
+        rels_n=[]
+        if n<=1:
+            #return [data]
+            return [rels]
+        if n==2:
+            return DatasetSplit.split_major_minor(len(all_rels),all_rels,do_sort=do_sort)
+        else:
+            rels_2= DatasetSplit.split_major_minor(len(all_rels),all_rels,do_sort=do_sort)
+            rels_n.extend(DatasetSplit.split_n(data,rels_2[0],n//2+n%2,do_sort=do_sort))
+            rels_n.extend(DatasetSplit.split_n(data,rels_2[1],n//2,do_sort=do_sort))
+            return rels_n
 
 
-def select_w_classes(data_p,classes_):
-    #data tokens
-    data=copy.deepcopy(data_p)
-    data.tokens=[x for x in data.tokens if x['relation'] in classes_]
-    data.reinit()
-    data.tokens=copy.deepcopy(data_p.tokens)
-    return data
+    @staticmethod
+    def make_multiple_datasets(fp,dataset_configuration,n=3,export_path='.',do_sort=True):
+        dataset_configuration.load_data_from_file(fp)
+        dataset_configuration._init_bert()
+        masks=DatasetSplit.split_n(dataset_configuration.data,dataset_configuration.data.all_rel,n,do_sort=do_sort)
+        datasets=[]
 
-def split_two(data,relations):
-    rels=[x['relation'] for x in data.tokens]
-    rels=[x for x in rels if x in relations]
-    majors,minors=split_major_minor(len(rels),rels)
-    return [select_w_classes(data,majors), select_w_classes(data,minors)]
+        print(masks)
+        for i in range(len(masks)):
+            mask=masks[i]
+            dataset=copy.deepcopy(dataset_configuration)
+            dataset.data.all_rel=mask
+            dataset._reinit()
+            dataset.generate_dataset()
+            dataset._pack_scheme()
+            datasets.append(dataset)
+            os.makedirs(export_path,exist_ok=True)
+            dataset.export_scheme(f"{export_path}/{i}.json")
+            dataset.save(f"{export_path}/{i}.pt")
 
-def split_n(data,n):
-    data_n=[]
-    if n<=1:
-        return [data]
-    if n==2:
-        return split_two(data,data.all_rel)
-    else:
-        data_2=split_two(data,data.all_rel) #major, minor
-        data_n.extend(split_n(data_2[0],n//2+n%2))
-        data_n.extend(split_n(data_2[1],n//2))
-        return data_n
+            print(len(dataset.sources[0]))
+            print(len(dataset.targets[0]))
+            #print(dataset.sources[0])
+            #print(dataset.targets[0])
 
-def make_multiple_datasets(fp,dataset_configuration,n=3):
-    data=ConlluDataset()
-    data.compute(fp)
-    data_n=split_n(data,n)
-    datasets=[]
-    for data_pack in data_n:
-        dataset=copy.deepcopy(dataset_configuration)
-        dataset.load_data(data_pack)
-        dataset.generate_dataset()
-        datasets.append(dataset)
-    return datasets
+        dataset_configuration._unload_bert()
+        return datasets
 
-    '''
+
 if __name__=='__main__':
-    b=SynTagRusBinarizer(use_bert=True,batch_size=64,use_sentenceemb=True,predict_head=True)
-    #b.load_data('dataset/slice.conllu')
-    b.load_data_from_file('dataset/ru_syntagrus-ud-train-a.conllu')
-    b.generate_dataset()
-    '''datasets=make_multiple_datasets('dataset/ru_syntagrus-ud-train-a.conllu',b)
-    c=1
-    for d in datasets:
-        d._pack_scheme()
-        d.export_scheme(f'test/{c}.json')
-        d.save(f'test/{c}.pt')
-        print(len(d.targets))
-        print(len(d.targets[0]))
-        c+=1'''
+    b=SynTagRusBinarizer(use_bert=True,batch_size=2048,use_sentenceemb=True,predict_head=True,use_head=False,sentence_batch=200)
+    #DatasetSplit.make_multiple_datasets('dataset/ru_syntagrus-ud-train-a.conllu',b,export_path='large')
+    DatasetSplit.make_multiple_datasets('dataset/slice.conllu',b,export_path='slice')

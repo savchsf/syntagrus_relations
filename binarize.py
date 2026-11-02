@@ -9,6 +9,8 @@ class Binarizer:
         self.tokenizer = None
         self.model=None
         self.bert_name=bert_name
+        self.bert_inited=False
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def _init_bert(self):
         try:
@@ -20,7 +22,9 @@ class Binarizer:
             self.tokenizer = BertTokenizer.from_pretrained(self.bert_name)
             self.model = BertModel.from_pretrained(self.bert_name)
         
+        self.model = self.model.to(self.device)
         self.model.eval()
+        self.bert_inited=True
 
     def _unload_bert(self):
         if self.model:
@@ -31,6 +35,7 @@ class Binarizer:
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        self.bert_inited=False
 
     def _bag_of_words_item(self,item,whole_list,normalize=True,cached=True):
         if item not in whole_list:
@@ -95,24 +100,35 @@ class Binarizer:
 
     def _bert_batch_words(self,words:list):
         inputs = self.tokenizer(words, return_tensors='pt',padding=True)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
         with torch.no_grad():
-            outputs = self.model(**inputs)
-            embeddings = outputs.last_hidden_state
+            outputs_bert = self.model(**inputs)
+            embeddings = outputs_bert.last_hidden_state
         #[batch_size, sequence_length, hidden_size(768/1024/...)]
 
         outputs=[]
 
         for i in range(embeddings.size(0)):
             batch=embeddings[i]
-            outputs.append(self._pooler(batch).numpy())
+            pooled=self._pooler(batch)
+            outputs.append(pooled.cpu().numpy())
+            del batch,pooled
+
+        del inputs, outputs_bert, embeddings
+    
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return outputs
 
     def bert_batch(self,words:list,batch_size=32):
         batches=self._chunks(words,batch_size) 
         results=[]
+        c=1
         for b in batches:
             results.extend(self._bert_batch_words(b))
+            print("Batch",c,'/',len(batches))
+            c+=1
         return results  
 
     def _one_hot(self, value, all_values, cached=True):
