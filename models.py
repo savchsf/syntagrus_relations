@@ -45,22 +45,40 @@ class Models:
 
         return acc, f1, report
 
-    def predict(self,X,scaled_X=True):
+    def predict(self,X,scaled_X=False):
         if not scaled_X:
-            X=self.scaler.fit_transform(X)
+            X=self.scaler.transform(X)
         
         return self.model.predict(X)
 
 if __name__=="__main__":
-    scaler=scalers.MinMaxScaler()
+
+    folder='bigger'
+    prefix='0'
+
+    scaler = joblib.load(folder + f'/{prefix}_scaler.pkl')
     m=Models(scaler)
     m.InitSVM()
 
-    b=BalancedSet()
-    b.load_train_test('bigger/0')
+    b=BalancedSet(scaler)
+    b.load_train_test(f'{folder}/{prefix}') #not heads
 
+    '''m.train_model(b.X_train,b.y_train)
+    predictions=m.predict(b.X_test)
+    acc, f1, report=m.evaluate_metric(b.y_test,predictions)
+    m.save_model(f"{folder}/{prefix}_model.pth")
+
+    print(report)
+
+    b.load_train_test(f'{folder}/{prefix}_heads') #heads
     m.train_model(b.X_train,b.y_train)
     predictions=m.predict(b.X_test)
-    metr=m.evaluate_metric(b.y_test,predictions)
+    acc, f1, report=m.evaluate_metric(b.y_test,predictions)
+    print(report)
+    m.save_model(f"{folder}/{prefix}_heads_model.pth")'''
 
-    print(metr)
+    b.load_train_test(f'{folder}/{prefix}_heads')
+    m.load_model(folder+f'/{prefix}_heads_model.pth')
+    predictions=m.predict(b.X_test)
+    acc, f1, report=m.evaluate_metric(b.y_test,predictions)
+    print(report)

@@ -2,12 +2,14 @@
 - connlu.py - parser
 - binarize.py - base binarization utils
 - syntagrusbin.py - specific syntagrus utils
-- balance.py - balance algorithms
+- prepare_sets.py - balance, test/train split, scaling to train data
+- scalers.py - scalers
+- models.py - SVM, LogRegression (partial_fit not supported yet)
 
 
 # Installation
 
 ```
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-pip install transformers
+conda env create -f environment.yml
+conda activate rel
 ```

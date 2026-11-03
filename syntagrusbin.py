@@ -341,16 +341,6 @@ class SynTagRusBinarizer(Binarizer):
         self.sources.extend(res_s)
         self.targets.extend(res_t)
 
-    def transfer_head_one(self,i):
-        self.targets[i] = np.concatenate((self.targets[i],np.asarray([self.sources[i][-1]])))
-        if not self.use_head:
-            self.sources[i] = self.sources[i][:-1]
-
-
-    def transfer_head(self):
-        for i in range(len(self.targets)):
-            self.transfer_head_one(i)
-
     def generate_dataset(self,ratio=0.3,do_shuffle=True): #head still not
 
         non_root=len([x for x in self.data.tokens if x['head']!=0 and x['relation'] in self.all_rel])
@@ -577,7 +567,7 @@ class DatasetSplit:
         dataset_configuration._unload_bert()
 
 if __name__=='__main__':
-    b=SynTagRusBinarizer(use_bert=True,batch_size=3000,use_sentenceemb=True,predict_head=True,use_head=False,sentence_batch=400)
+    b=SynTagRusBinarizer(use_bert=True,batch_size=3000,use_sentenceemb=True,predict_head=True,use_head=True,sentence_batch=400, use_s_no=False, use_distance=False)
     #DatasetSplit.make_multiple_datasets('dataset/ru_syntagrus-ud-train-a.conllu',b,export_path='large')
     #DatasetSplit.make_multiple_datasets('dataset/slice.conllu',b,export_path='slice')
     DatasetSplit.make_multiple_datasets('dataset/bigger.conllu',b,export_path='bigger')

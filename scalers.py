@@ -1,7 +1,13 @@
 import numpy as np
 from abc import ABC, abstractmethod
+import joblib
 
 class Scaler(ABC):
+
+    def __init__(self,path=None):
+        if path is not None:
+            self.load(path)
+
     @abstractmethod
     def fit(self,matrix):
         pass
@@ -13,6 +19,10 @@ class Scaler(ABC):
     def fit_transform(self,matrix):
         self.fit(matrix)
         return self.transform(matrix)
+
+    def save(self,path):
+        joblib.dump(self,path)
+    
 
 
 class MinMaxScaler(Scaler):
