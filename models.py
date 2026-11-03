@@ -12,6 +12,14 @@ from sklearn.metrics import mean_squared_error, r2_score,accuracy_score, f1_scor
 
 import scalers
 
+import shutil
+
+import json
+
+from glob import glob
+
+import os
+
 class Models:
 
     def __init__(self,scaler):
@@ -20,10 +28,10 @@ class Models:
 
     def InitLogistic(self,max_iter=10000):
         #self.model=OneVsRestClassifier(LogisticRegression(max_iter=max_iter))
-        self.model = SGDClassifier(loss='log_loss', max_iter=max_iter)
+        self.model = SGDClassifier(loss='log_loss', max_iter=max_iter, class_weight='balanced')
 
     def InitSVM(self,kernel='rbf',C=1.0):
-        self.model=OneVsRestClassifier(SVC(kernel=kernel, C=C))
+        self.model=OneVsRestClassifier(SVC(kernel=kernel, C=C, class_weight='balanced'))
 
     def train_model(self,X_train,y_train,scaled_X=True):
         if not scaled_X:
@@ -51,34 +59,59 @@ class Models:
         
         return self.model.predict(X)
 
+class TrainModels:
+
+    @staticmethod
+    def trainmodel(b,m,load_path,save_path):
+        b.load_train_test(load_path)
+        m.train_model(b.X_train,b.y_train)
+        predictions=m.predict(b.X_test)
+        acc, f1, report=m.evaluate_metric(b.y_test,predictions)
+        m.save_model(f"{save_path}_model.pth")
+        with open(save_path+'_metrics.txt','w',encoding='utf-8') as f:
+            f.write(report)
+
+    @staticmethod
+    def process_one(directory,prefix,type_,save_dir):
+        scaler = joblib.load(directory + f'/{prefix}_scaler.pkl')
+        m=Models(scaler)
+
+        if type_=='SVM':
+            m.InitSVM()
+        elif type_=="Logistic":
+            m.InitLogistic()
+        else:
+            raise NotImplementedError("Select a model (SVM or Logistic)")
+
+        os.makedirs(save_dir,exist_ok=True)
+
+        save_path=save_dir+'/'+prefix
+
+        with open(f'{directory}/{prefix}.json') as f:
+            scheme=json.load(f)
+
+        b=BalancedSet()
+        TrainModels.trainmodel(b,m,f'{directory}/{prefix}',save_path)
+
+        if scheme['predict_head']:
+            TrainModels.trainmodel(b,m,f'{directory}/{prefix}_heads',save_path+'_heads')
+
+        shutil.copy(f'{directory}/{prefix}.json',save_path+'.json')
+        shutil.copy(f'{directory}/{prefix}_bow.json',save_path+'_bow.json')
+
+    @staticmethod
+    def get_prefixes(directory):
+        paths=glob(directory+'/*.json') #counting prefixes by json
+        prefixes=[x.split('/')[-1].replace('.json','') for x in list(paths) if '_bow' not in x]
+        return prefixes
+
+    @staticmethod
+    def process_all(directory,type_,save_dir):
+        prefixes=TrainModels.get_prefixes(directory)
+        for prefix in prefixes:
+            TrainModels.process_one(directory,prefix,type_,save_dir)
+        
+
 if __name__=="__main__":
 
-    folder='bigger'
-    prefix='0'
-
-    scaler = joblib.load(folder + f'/{prefix}_scaler.pkl')
-    m=Models(scaler)
-    m.InitSVM()
-
-    b=BalancedSet(scaler)
-    b.load_train_test(f'{folder}/{prefix}') #not heads
-
-    '''m.train_model(b.X_train,b.y_train)
-    predictions=m.predict(b.X_test)
-    acc, f1, report=m.evaluate_metric(b.y_test,predictions)
-    m.save_model(f"{folder}/{prefix}_model.pth")
-
-    print(report)
-
-    b.load_train_test(f'{folder}/{prefix}_heads') #heads
-    m.train_model(b.X_train,b.y_train)
-    predictions=m.predict(b.X_test)
-    acc, f1, report=m.evaluate_metric(b.y_test,predictions)
-    print(report)
-    m.save_model(f"{folder}/{prefix}_heads_model.pth")'''
-
-    b.load_train_test(f'{folder}/{prefix}_heads')
-    m.load_model(folder+f'/{prefix}_heads_model.pth')
-    predictions=m.predict(b.X_test)
-    acc, f1, report=m.evaluate_metric(b.y_test,predictions)
-    print(report)
+    TrainModels.process_all('bigger_balanced','SVM','bigger_models')

@@ -19,8 +19,6 @@ class SynTagRusBinarizer(Binarizer):
     use_head=True, predict_head=True, use_pos=True, use_morph=True,
     use_sentenceemb=True, use_s_no=True, use_distance=True, binary=False,sentence_batch=4
     ):
-        #новая стратегия: все признаки всегда кодируются как one_hot. Голова всегда последняя.abs
-        #переброс головы случится после балансировки, которая проводится перед тренировкой в отдельном файле (и для сурсов, и для таргетов)
         super().__init__(use_bert,bert_name)
         self.sources=[]
         self.targets=[]
@@ -73,11 +71,6 @@ class SynTagRusBinarizer(Binarizer):
         self.sentence_batch=sentence_batch
 
     def _bag_of_words_cache_init(self):
-        '''
-        self.bow_words={} #word:idx
-        self.bow_pos={} #pos:idx
-        self.bow_features={}
-        '''
         self.bow_words = {x: i +1 for i, x in enumerate(self.all_words)}
         self.bow_pos = {x: i +1 for i, x in enumerate(self.all_pos)}
         self.bow_features = {x: i +1 for i, x in enumerate(self.all_features)}
@@ -137,9 +130,6 @@ class SynTagRusBinarizer(Binarizer):
             self.word_no+=1
             return self.word_no
         return self._bag_of_words_item(word,self.bow_words)
-
-    '''def _encode_discr(self,elem,all_elems):
-        return self._one_hot(elem,all_elems)'''
 
     def _pair_word(self,w1,w2):
         w1_emb=self._encode_word(w1['word'])
@@ -341,7 +331,7 @@ class SynTagRusBinarizer(Binarizer):
         self.sources.extend(res_s)
         self.targets.extend(res_t)
 
-    def generate_dataset(self,ratio=0.3,do_shuffle=True): #head still not
+    def generate_dataset(self,ratio=0.3,do_shuffle=True):
 
         non_root=len([x for x in self.data.tokens if x['head']!=0 and x['relation'] in self.all_rel])
 
@@ -550,8 +540,6 @@ class DatasetSplit:
 
         print(len(dataset.sources[0]))
         print(len(dataset.targets[0]))
-        #print(dataset.sources[0])
-        #print(dataset.targets[0])
 
 
     @staticmethod
