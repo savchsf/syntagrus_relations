@@ -1,5 +1,5 @@
 
-
+import copy
 
 class ConlluDataset:
     def __init__(self,unk_token='_'):
@@ -95,11 +95,39 @@ class ConlluDataset:
         self.all_pos=self._sorted_key(self.tokens,'pos')
         self.all_rel=self._sorted_key(self.tokens,'relation')
 
-'''d=ConlluDataset()
-d.compute('dataset/ru_syntagrus-ud-test.conllu')
+    @staticmethod
+    def split_into_chunks(data_con,n_sentences_max):
+        datas=[]
+        curr_sen=len(data_con.sentences)
+
+        tokens_by_sentence=dict()
+        for token in data_con.tokens:
+            if token['sentence'] not in tokens_by_sentence:
+                tokens_by_sentence[token['sentence']]=[]
+            tokens_by_sentence[token['sentence']].append(token)
+
+        curr=0
+        #print(tokens_by_sentence.keys())
+
+        while curr<curr_sen:
+            new_chunk=copy.deepcopy(data_con)
+            #new_chunk.sentences=data_con.sentences[curr:curr+n_sentences_max]
+            new_chunk.tokens=[]
+            for sen_no in range(curr,min(curr+n_sentences_max,curr_sen)):
+                new_chunk.tokens.extend(tokens_by_sentence[sen_no])
+            #new_chunk.tokens=[tok for x in range(curr,min(curr+n_sentences_max,curr_sen)) for tok in tokens_by_sentence[x]]
+            curr+=n_sentences_max
+            datas.append(new_chunk)
+
+        return datas
+
+d=ConlluDataset()
+d.compute('dataset/bigger.conllu')
 
 
 if __name__=='__main__':
     print(d.tokens[88]['features'])
-
-    print(d.all_features)'''
+    print(d.all_features)
+    datas=ConlluDataset.split_into_chunks(d,500)
+    print(len(datas))
+    print(datas[0].tokens[0])
