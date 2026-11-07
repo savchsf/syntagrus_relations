@@ -2,6 +2,7 @@ import torch
 from transformers import BertTokenizer, BertModel
 import numpy as np
 import gc
+from tqdm import tqdm
 
 class Binarizer:
 
@@ -125,9 +126,9 @@ class Binarizer:
         batches=self._chunks(words,batch_size) 
         results=[]
         c=1
-        for b in batches:
+        for b in tqdm(batches, desc="Bert inference", unit="batch"):
             results.extend(self._bert_batch_words(b))
-            print("Batch",c,'/',len(batches))
+            #print("Batch",c,'/',len(batches))
             c+=1
         return results  
 

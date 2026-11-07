@@ -6,7 +6,10 @@ import scalers
 
 from sklearn.model_selection import train_test_split
 
-from imblearn.under_sampling import NearMiss, TomekLinks
+from imblearn.under_sampling import (NearMiss, TomekLinks, RandomUnderSampler, EditedNearestNeighbours,
+                                     InstanceHardnessThreshold
+                                     )
+from imblearn.over_sampling import (ADASYN, SMOTE, RandomOverSampler)
 
 import torch
 
@@ -18,7 +21,13 @@ from glob import glob
 
 import shutil
 
-from glob import glob
+from collections import Counter
+
+
+all_balance_mathods=["NearMiss1","NearMiss2","NearMiss3",
+                     'TomekLinks',"RandomUnderSampler","EditedNearestNeighbours",
+                     "InstanceHardnessThreshold",
+                     "ADASYN","SMOTE","RandomOverSampler"]
 
 class BalancedSet:
     def __init__(self):
@@ -56,8 +65,8 @@ class BalancedSet:
 
         self.dataset.load(data_path)
 
-    def do_balance(self,k=2):
-        nm3 = NearMiss(version=3, n_neighbors=k)
+    def _NearM(self,k=2,ver=3):
+        nm3 = NearMiss(version=ver, n_neighbors=k)
         nearmissed=False
         while (not nearmissed) and k>0:
             try:
@@ -65,12 +74,58 @@ class BalancedSet:
                 nearmissed=True
             except ValueError:
                 k-=1
-
-        tl = TomekLinks()
+    def _methd(self,method):
         try:
-            self.X_train, self.y_train = tl.fit_resample(self.X_train, self.y_train)
+            self.X_train, self.y_train = method.fit_resample(self.X_train, self.y_train)
         except Exception:
             pass
+
+    def do_balance(self,k=2,methods=all_balance_mathods):
+        '''
+        all_balance_mathods=["NearMiss1","NearMiss2","NearMiss3",
+                     'TomekLinks',"RandomUnderSampler","EditedNearestNeighbours",
+                     "InstanceHardnessThreshold",
+                     "ADASYN","SMOTE","RandomOverSampler",
+                     "BalanceCascade","BalancedRandomForestClassifier"]
+        '''
+
+        if "ADASYN" in methods:
+            asn=ADASYN(n_neighbors=k)
+            self._methd(asn)
+
+        if "SMOTE" in methods:
+            sm=SMOTE(k_neighbors=k)
+            self._methd(sm)
+
+        if "RandomOverSampler" in methods:
+            ros=RandomOverSampler()
+            self._methd(ros)
+
+        if "NearMiss1" in methods:
+            self._NearM(k,ver=1)
+
+        if "NearMiss2" in methods:
+            self._NearM(k,ver=2)
+
+        if "NearMiss3" in methods:
+            self._NearM(k,ver=3)
+
+        if "TomekLinks" in methods:
+            tl = TomekLinks()
+            self._methd(tl)
+
+        if "RandomUnderSampler" in methods:
+            ru=RandomUnderSampler()
+            self._methd(ru)
+
+        if "EditedNearestNeighbours" in methods:
+            enn=EditedNearestNeighbours(n_neighbors=k)
+            self._methd(enn)
+
+        if "InstanceHardnessThreshold" in methods:
+            iht=InstanceHardnessThreshold(cv=k)
+            self._methd(iht)
+
 
     def finalize(self,path):
         self.X_train=np.asarray(self.X_train)
@@ -80,17 +135,28 @@ class BalancedSet:
 
         self.save_train_test(path)
 
-    def prepare_sets_rels(self,k=2,test_size=0.03,exp_path='./',prefix='0'): #split test,train
+    def prepare_sets_rels(self,k=2,test_size=0.03,exp_path='./',prefix='0',balance=all_balance_mathods): #split test,train
+
+        X=self.dataset.sources
 
         #1: squeeze targets
         y=[self.dataset.squeeze_result(t) for t in self.dataset.targets]
         y=np.asarray(y)
+
+        counts = Counter(y)
+        single_classes = [cls for cls, count in counts.items() if count == 1]
+
+        if single_classes:
+            mask = np.isin(y, single_classes)
+            X = np.concatenate([X, X[mask]], axis=0)
+            y = np.concatenate([y, y[mask]], axis=0)
+
         #2: train test
-        self.X_train,self.X_test,self.y_train,self.y_test=train_test_split(self.dataset.sources,y,test_size=test_size,stratify=y)
+        self.X_train,self.X_test,self.y_train,self.y_test=train_test_split(X,y,test_size=test_size,stratify=y)
         #3: scale train
         self.X_train=self.scaler.fit_transform(self.X_train)
         #4: balance train
-        self.do_balance(k=k)
+        self.do_balance(k=k,methods=balance)
     
         #5: unsqueeze targets
         self.y_train=[self.dataset.depickle_result(x) for x in self.y_train]
@@ -99,7 +165,7 @@ class BalancedSet:
         #return
         self.finalize(exp_path+'/'+prefix)
 
-    def prepare_sets_head(self,k=2,test_size=0.03,exp_path='./',prefix='0'):
+    def prepare_sets_head(self,k=2,test_size=0.03,exp_path='./',prefix='0',balance=all_balance_mathods):
 
         datas=self.dataset.sources #np.array 2xn
         datas=np.asarray(datas)
@@ -111,20 +177,20 @@ class BalancedSet:
         #3: scale train
         self.X_train=self.scaler.transform(self.X_train)
         #4: balance train
-        self.do_balance(k=k)
+        self.do_balance(k=k,methods=balance)
         #return
 
         self.finalize(exp_path+'/'+prefix+'_heads')
 
-    def export_dataset(self,scheme,data_path,k=2,test_size=0.03,exp_path='./',prefix='0'):
+    def export_dataset(self,scheme,data_path,k=2,test_size=0.03,exp_path='./',prefix='0',balance=all_balance_mathods):
 
         os.makedirs(exp_path,exist_ok=True)
 
         self.load_from_scheme_for_eval(scheme,data_path)
-        self.prepare_sets_rels(k,test_size,exp_path,prefix)
+        self.prepare_sets_rels(k,test_size,exp_path,prefix,balance=balance)
 
         if self.dataset.predict_head:
-            self.prepare_sets_head(k,test_size,exp_path,prefix)
+            self.prepare_sets_head(k,test_size,exp_path,prefix,balance=balance)
 
         self.scaler.save(exp_path+'/'+prefix+'_scaler.pkl')
 
@@ -143,11 +209,11 @@ class BalancedSet:
 
 class DatasetBalance:
     @staticmethod
-    def process_subset(directory,prefix,scaler,test_size,k,exp_path):
+    def process_subset(directory,prefix,scaler,test_size,k,exp_path,balance=all_balance_mathods):
         b=BalancedSet()
         b.set_scaler(scaler)
         gen_path=directory+'/'+prefix
-        b.export_dataset(gen_path+'.json',gen_path,test_size=test_size,k=k,exp_path=exp_path,prefix=prefix)
+        b.export_dataset(gen_path+'.json',gen_path,test_size=test_size,k=k,exp_path=exp_path,prefix=prefix,balance=balance)
         shutil.copy(gen_path+'.json',exp_path+'/'+prefix+'.json')
         shutil.copy(gen_path+'_bow.json',exp_path+'/'+prefix+'_bow.json')
 
@@ -159,14 +225,14 @@ class DatasetBalance:
 
     @staticmethod
     def process_all(directory,exp_path,
-                    scaler,test_size=0.3,k=2
+                    scaler,test_size=0.3,k=2,balance=all_balance_mathods
                     ):
         prefixes=DatasetBalance.get_prefixes(directory)
 
         for prefix in prefixes:
-            DatasetBalance.process_subset(directory,prefix,scaler,test_size,k,exp_path)
+            DatasetBalance.process_subset(directory,prefix,scaler,test_size,k,exp_path,balance=balance)
 
 if __name__=='__main__':
     scaler=scalers.MinMaxScaler()
     DatasetBalance.process_all('bigger','bigger_balanced',scaler)
-    
+

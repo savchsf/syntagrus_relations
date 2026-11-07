@@ -13,6 +13,10 @@ from collections import Counter
 import shutil
 from glob import glob
 
+import joblib
+
+from tqdm import tqdm
+
 class SynTagRusBinarizer(Binarizer):
     def __init__(self,use_bert=True,bert_name='sergeyzh/rubert-mini-uncased',
     batch_size=32,unk_token='_',
@@ -292,7 +296,7 @@ class SynTagRusBinarizer(Binarizer):
     def generate_negative_heads(self,ratio=0.5):
         #работает со списками из np.array
         n_new=math.ceil(len(self.targets)*ratio)
-        print(n_new)
+        #print(n_new)
         selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
         res_s=[]
         res_t=[]
@@ -302,6 +306,19 @@ class SynTagRusBinarizer(Binarizer):
             res_t.append(ct)
         self.sources.extend(res_s)
         self.targets.extend(res_t)
+
+    def generate_new_head(self,ratio=0.3):
+        n_new=math.ceil(len(self.targets)*ratio)
+        selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
+        res_s=[]
+        res_t=[]
+        for i in selected_indices:
+            cs,ct=self._invert_head(self.sources[i],self.targets[i])
+            res_s.append(cs)
+            res_t.append(ct)
+        self.sources.extend(res_s)
+        self.targets.extend(res_t)
+
 
     #------SHUFFLE------
 
@@ -341,6 +358,8 @@ class SynTagRusBinarizer(Binarizer):
                 self._init_bert()
 
             if (self.use_head or self.predict_head) and self.use_sentenceemb:
+                ratio=ratio/3
+            elif (self.use_head or self.predict_head) and not self.use_sentenceemb:
                 ratio=ratio/2
 
             if self.use_sentenceemb:
@@ -349,19 +368,20 @@ class SynTagRusBinarizer(Binarizer):
             c=-1
 
 
-            for t in self.data.tokens:
+            for t in tqdm(self.data.tokens, desc="Processing (no bert)", unit="samples"):
                 if t['head']!=0 and (t['relation'] in self.all_rel or t['relation']==self.unk_token):
                     self.sources.append(self.generate_source(t))
                     self.targets.append(self.generate_target(t))
                     c+=1
-                    if c%1000==0:
-                        print('Processed (no bert)',c+1,'/',non_root)
+                    #if c%1000==0:
+                    #    print('Processed (no bert)',c+1,'/',non_root)
 
             if self.use_bert and self.bert_inited:
                 self.return_bert()
 
             if self.use_head or self.predict_head:
                 self.generate_negative_heads(ratio)
+                self.generate_new_head(ratio)
 
             if do_shuffle:
                 self.shuffle_data()
@@ -517,8 +537,8 @@ class DatasetSplit:
         #here would be chunked data...
 
         c=1
-        for chunk in data_chunks:
-            print('Chunk',c,'/',len(data_chunks))
+        for chunk in tqdm(data_chunks, desc="Processing chunks", unit="chunks"):
+            #print('Chunk',c,'/',len(data_chunks))
             dataset.sources=[]
             dataset.targets=[]
             dataset.load_data(chunk)
@@ -543,11 +563,23 @@ class DatasetSplit:
 
 
     @staticmethod
-    def make_multiple_datasets(fp,dataset_configuration,n=3,export_path='.',do_sort=True,max_sen=400):
-        dataset_configuration.load_data_from_file(fp)
+    def make_multiple_datasets(dataset_configuration,fp=None,n=3,export_path='.',do_sort=True,max_sen=400,chunks_dir=None):
+
+
+        if chunks_dir is not None:
+            lst_ch=glob(chunks_dir+'/*.conllubin')
+            datas=[joblib.load(x) for x in lst_ch if 'template' not in x]
+            base=[joblib.load(x) for x in lst_ch if 'template' in x][0]
+            dataset_configuration.load_data(base)
+
+        else:
+            datas=ConlluDataset.split_into_chunks(dataset_configuration.data,max_sen)
+            dataset_configuration.load_data_from_file(fp)
+
         dataset_configuration._init_bert()
+
         masks=DatasetSplit.split_n(dataset_configuration.data,dataset_configuration.data.all_rel,n,do_sort=do_sort)
-        datas=ConlluDataset.split_into_chunks(dataset_configuration.data,max_sen)
+
         print(masks)
         for i in range(len(masks)):
             DatasetSplit.process_one(fp,dataset_configuration,masks[i],i,export_path,datas)
@@ -555,7 +587,7 @@ class DatasetSplit:
         dataset_configuration._unload_bert()
 
 if __name__=='__main__':
-    b=SynTagRusBinarizer(use_bert=True,batch_size=3000,use_sentenceemb=True,predict_head=True,use_head=True,sentence_batch=400, use_s_no=False, use_distance=False)
+    b=SynTagRusBinarizer(use_bert=True,batch_size=4000,use_sentenceemb=True,predict_head=True,use_head=True,sentence_batch=600, use_s_no=False, use_distance=False)
     #DatasetSplit.make_multiple_datasets('dataset/ru_syntagrus-ud-train-a.conllu',b,export_path='large')
     #DatasetSplit.make_multiple_datasets('dataset/slice.conllu',b,export_path='slice')
-    DatasetSplit.make_multiple_datasets('dataset/bigger.conllu',b,export_path='bigger')
+    DatasetSplit.make_multiple_datasets(b,'dataset/bigger.conllu',export_path='bigger')

@@ -1,6 +1,10 @@
 
 import copy
 
+import joblib
+
+import os
+
 class ConlluDataset:
     def __init__(self,unk_token='_'):
         self.sentences=[]
@@ -95,8 +99,24 @@ class ConlluDataset:
         self.all_pos=self._sorted_key(self.tokens,'pos')
         self.all_rel=self._sorted_key(self.tokens,'relation')
 
+    def save(self,path):
+        path='./'+path
+        os.makedirs(path.split('/')[:-1],exist_ok=True)
+        joblib.dump(self,path)
+
     @staticmethod
-    def split_into_chunks(data_con,n_sentences_max):
+    def mkempty(data_con):
+        new_chunk=ConlluDataset(data_con.unk_token)
+        new_chunk.all_features=data_con.all_features
+        new_chunk.all_words=data_con.all_words
+        new_chunk.all_pos=data_con.all_pos
+        new_chunk.all_rel=data_con.all_rel
+        new_chunk.sentences=data_con.sentences
+        new_chunk.tokens=[]
+        return new_chunk
+
+    @staticmethod
+    def split_into_chunks(data_con,n_sentences_max,save_dir=None,name='dataset'):
         datas=[]
         curr_sen=len(data_con.sentences)
 
@@ -108,24 +128,48 @@ class ConlluDataset:
 
         curr=0
 
+        '''
+        self.sentences=[]
+        self.tokens=[]
+        self.all_features={}
+        self.all_words=[]
+        self.all_pos=[]
+        self.all_rel=[]
+        self.unk_token=unk_token
+        '''
+        c=0
+
         while curr<curr_sen:
-            new_chunk=copy.deepcopy(data_con)
-            new_chunk.tokens=[]
+            #new_chunk=copy.deepcopy(data_con)
+
+            new_chunk=ConlluDataset.mkempty(data_con)
+
             for sen_no in range(curr,min(curr+n_sentences_max,curr_sen)):
                 new_chunk.tokens.extend(tokens_by_sentence[sen_no])
             
             curr+=n_sentences_max
             datas.append(new_chunk)
+            if save_dir:
+                os.makedirs(save_dir,exist_ok=True)
+                joblib.dump(new_chunk,save_dir+f'/{c}_{name}.conllubin')
+            c+=1
+
+
+        if save_dir:
+            os.makedirs(save_dir,exist_ok=True)
+            joblib.dump(data_con,save_dir+f'/template_{name}.conllubin')
+
+        datas.append(data_con)
 
         return datas
 
 d=ConlluDataset()
-d.compute('dataset/bigger.conllu')
+d.compute('dataset/ru_syntagrus-ud-train-a.conllu')
 
 
 if __name__=='__main__':
     print(d.tokens[88]['features'])
     print(d.all_features)
-    datas=ConlluDataset.split_into_chunks(d,500)
+    datas=ConlluDataset.split_into_chunks(d,500,'train_a/conllu_parts')
     print(len(datas))
     print(datas[0].tokens[0])
