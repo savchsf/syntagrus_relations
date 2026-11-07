@@ -35,7 +35,7 @@ def main():
                                 use_s_no= config["use_s_no"], use_distance= config["use_distance"], binary= config["binary"], sentence_batch= config["batch_sentence"]
 
                                 )
-        DatasetSplit.make_multiple_datasets(dataset_configuration=bin_,n=config["n_predictors"], export_path=exp_d+'/binarized_data', chunks_dir=exp_d+'/conllu_parts')
+        DatasetSplit.make_multiple_datasets(dataset_configuration=bin_,n=config["n_predictors"], export_path=exp_d+'/binarized_data', chunks_dir=exp_d+'/conllu_parts',ignored=config['ignored'],strip_colon=config['strip_colon'])
         print('Binarized!')
 
     #3. Balance

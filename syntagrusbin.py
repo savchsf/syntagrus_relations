@@ -524,8 +524,8 @@ class DatasetSplit:
             return DatasetSplit.split_major_minor(len(all_rels),all_rels,do_sort=do_sort)
         else:
             rels_2= DatasetSplit.split_major_minor(len(all_rels),all_rels,do_sort=do_sort)
-            rels_n.extend(DatasetSplit.split_n(data,rels_2[0],n//2+n%2,do_sort=do_sort))
-            rels_n.extend(DatasetSplit.split_n(data,rels_2[1],n//2,do_sort=do_sort))
+            rels_n.extend(DatasetSplit.split_n(data,rels_2[0],n//2,do_sort=do_sort))
+            rels_n.extend(DatasetSplit.split_n(data,rels_2[1],n//2+n%2,do_sort=do_sort))
             return rels_n
 
     @staticmethod
@@ -563,7 +563,7 @@ class DatasetSplit:
 
 
     @staticmethod
-    def make_multiple_datasets(dataset_configuration,fp=None,n=3,export_path='.',do_sort=True,max_sen=400,chunks_dir=None):
+    def make_multiple_datasets(dataset_configuration,fp=None,n=3,export_path='.',do_sort=True,max_sen=400,chunks_dir=None,ignored={},strip_colon=True):
 
 
         if chunks_dir is not None:
@@ -578,13 +578,28 @@ class DatasetSplit:
 
         dataset_configuration._init_bert()
 
-        masks=DatasetSplit.split_n(dataset_configuration.data,dataset_configuration.data.all_rel,n,do_sort=do_sort)
+
+        rels_f=DatasetSplit.mod_rels(dataset_configuration.data.all_rel,strip_colon,ignored)
+        if strip_colon:
+            rels_f=[x.split(':')[0] for x in rels_f]
+            dataset_configuration.data.tokens=[DatasetSplit.strip_colon_token(x) for x in dataset_configuration.data.tokens if ':' in x['relation']]
+        masks=DatasetSplit.split_n(dataset_configuration.data,rels_f,n,do_sort=do_sort)
 
         print(masks)
         for i in range(len(masks)):
             DatasetSplit.process_one(fp,dataset_configuration,masks[i],i,export_path,datas)
 
         dataset_configuration._unload_bert()
+
+    @staticmethod
+    def mod_rels(rels,strip_colon: True, ignored={'punct', 'dep', 'dislocated', 'orphan', 'list', 'vocative', 'expl', 'flat'}):
+        rels=[x for x in rels if x not in ignored]
+        return rels
+
+    @staticmethod
+    def strip_colon_token(token):
+        token["relation"]=token["relation"].split(':')[0]
+        return token
 
 if __name__=='__main__':
     b=SynTagRusBinarizer(use_bert=True,batch_size=4000,use_sentenceemb=True,predict_head=True,use_head=True,sentence_batch=600, use_s_no=False, use_distance=False)
