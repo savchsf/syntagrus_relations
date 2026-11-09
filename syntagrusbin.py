@@ -601,6 +601,9 @@ class DatasetSplit:
         token["relation"]=token["relation"].split(':')[0]
         return token
 
+
+    
+
 if __name__=='__main__':
     b=SynTagRusBinarizer(use_bert=True,batch_size=4000,use_sentenceemb=True,predict_head=True,use_head=True,sentence_batch=600, use_s_no=False, use_distance=False)
     #DatasetSplit.make_multiple_datasets('dataset/ru_syntagrus-ud-train-a.conllu',b,export_path='large')
