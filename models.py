@@ -47,6 +47,13 @@ class Models:
         self.model=joblib.load(path)
 
     def evaluate_metric(self,y_test,y_pred):
+        
+        all_zero_test = (y_test.sum(axis=1) == 0).astype(int).reshape(-1, 1)
+        all_zero_pred = (y_pred.sum(axis=1) == 0).astype(int).reshape(-1, 1)
+    
+        y_test = np.hstack((y_test, all_zero_test))
+        y_pred = np.hstack((y_pred, all_zero_pred))
+
         acc = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred, average='macro', zero_division=0)
         report = classification_report(y_test, y_pred, zero_division=0)
