@@ -57,7 +57,7 @@ def main():
 
     if "4" in config["stages"]:
         print("4. Training...")
-        TrainModels.process_all(exp_d+'/balanced_data',config["model"],exp_d+'/results')
+        TrainModels.process_all(exp_d+'/balanced_data',config["model"],exp_d+'/results',thr=config['zero_threshold'])
         print('Trained!')
 
 

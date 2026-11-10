@@ -46,13 +46,17 @@ class Models:
     def load_model(self,path):
         self.model=joblib.load(path)
 
-    def evaluate_metric(self,y_test,y_pred):
+    def one_hot_class(self,vector,thr=0.1):
+        value=np.argmax(vector)
+        if value<=thr:
+            return 0
+        return value+1
+
+    def evaluate_metric(self,y_test,y_pred,one_hot=True,thr=0.1):
         
-        all_zero_test = (y_test.sum(axis=1) == 0).astype(int).reshape(-1, 1)
-        all_zero_pred = (y_pred.sum(axis=1) == 0).astype(int).reshape(-1, 1)
-    
-        y_test = np.hstack((y_test, all_zero_test))
-        y_pred = np.hstack((y_pred, all_zero_pred))
+        if one_hot:
+            y_test=np.asarray([self.one_hot_class(x,thr) for x in y_test])
+            y_pred=np.asarray([self.one_hot_class(x,thr) for x in y_pred])
 
         acc = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred, average='macro', zero_division=0)
@@ -69,17 +73,17 @@ class Models:
 class TrainModels:
 
     @staticmethod
-    def trainmodel(b,m,load_path,save_path):
+    def trainmodel(b,m,load_path,save_path,head=False,thr=0.1):
         b.load_train_test(load_path)
         m.train_model(b.X_train,b.y_train)
         predictions=m.predict(b.X_test)
-        acc, f1, report=m.evaluate_metric(b.y_test,predictions)
+        acc, f1, report=m.evaluate_metric(b.y_test,predictions,not head, thr)
         m.save_model(f"{save_path}_model.pth")
         with open(save_path+'_metrics.txt','w',encoding='utf-8') as f:
             f.write(report)
 
     @staticmethod
-    def process_one(directory,prefix,type_,save_dir):
+    def process_one(directory,prefix,type_,save_dir,thr=0.1):
         scaler = joblib.load(directory + f'/{prefix}_scaler.pkl')
         m=Models(scaler)
 
@@ -98,10 +102,10 @@ class TrainModels:
             scheme=json.load(f)
 
         b=BalancedSet()
-        TrainModels.trainmodel(b,m,f'{directory}/{prefix}',save_path)
+        TrainModels.trainmodel(b,m,f'{directory}/{prefix}',save_path,head=False,thr=thr)
 
         if scheme['predict_head']:
-            TrainModels.trainmodel(b,m,f'{directory}/{prefix}_heads',save_path+'_heads')
+            TrainModels.trainmodel(b,m,f'{directory}/{prefix}_heads',save_path+'_heads',head=True)
 
         shutil.copy(f'{directory}/{prefix}.json',save_path+'.json')
         shutil.copy(f'{directory}/{prefix}_bow.json',save_path+'_bow.json')
@@ -113,12 +117,12 @@ class TrainModels:
         return prefixes
 
     @staticmethod
-    def process_all(directory,type_,save_dir):
+    def process_all(directory,type_,save_dir,thr=0.1):
         prefixes=TrainModels.get_prefixes(directory)
         for prefix in prefixes:
-            TrainModels.process_one(directory,prefix,type_,save_dir)
+            TrainModels.process_one(directory,prefix,type_,save_dir,thr=thr)
         
 
 if __name__=="__main__":
 
-    TrainModels.process_all('bigger_balanced','SVM','bigger_models')
+    TrainModels.process_all('bigger_balanced','SVM','bigger_models',thr=0.1)

@@ -136,6 +136,9 @@ class Binarizer:
         vector = [0]*len(all_values)
         if cached:
             if value in all_values:
+                #print(all_values)
+                #print(value)
+                #print(vector)
                 vector[all_values[value]-1] = 1
         else:
             if value in all_values:

@@ -268,7 +268,7 @@ class SynTagRusBinarizer(Binarizer):
         new_token=copy.deepcopy(token)
 
         sentence_n=new_token['sentence']
-        new_token['rel']=self.unk_token
+        new_token['relation']=self.unk_token
 
         #select
         others=[x for x in self.sentence_tokens_cache[sentence_n] if x!=token]
@@ -371,6 +371,7 @@ class SynTagRusBinarizer(Binarizer):
             for t in tqdm(self.data.tokens, desc="Processing (no bert)", unit="samples"):
                 if t['head']!=0 and (t['relation'] in self.all_rel or t['relation']==self.unk_token):
                     self.sources.append(self.generate_source(t))
+                    #print(self.bow_rel)
                     self.targets.append(self.generate_target(t))
                     c+=1
                     #if c%1000==0:
@@ -516,10 +517,12 @@ class DatasetSplit:
     def split_n(data,rels,n,do_sort=True):
         #возвращает маски all_rel
         all_rels=[x['relation'] for x in data.tokens if x['relation'] in rels]
+        all_rels=list(set(all_rels))
+        print(all_rels)
         rels_n=[]
         if n<=1:
             #return [data]
-            return [rels]
+            return [all_rels]
         if n==2:
             return DatasetSplit.split_major_minor(len(all_rels),all_rels,do_sort=do_sort)
         else:
@@ -543,6 +546,7 @@ class DatasetSplit:
             dataset.targets=[]
             dataset.load_data(chunk)
             dataset.all_rel=mask
+            dataset.data.all_rel=mask
             dataset._bag_of_words_rel_cache_init()
             dataset.generate_dataset()
             dataset.save(f"{export_path}/tmp/{i}_{c}")
@@ -563,8 +567,7 @@ class DatasetSplit:
 
 
     @staticmethod
-    def make_multiple_datasets(dataset_configuration,fp=None,n=3,export_path='.',do_sort=True,max_sen=400,chunks_dir=None,ignored={},strip_colon=True):
-
+    def make_multiple_datasets(dataset_configuration,fp=None,n=3,export_path='.',do_sort=True,max_sen=400,chunks_dir=None,ignored=[],strip_colon=True):
 
         if chunks_dir is not None:
             lst_ch=glob(chunks_dir+'/*.conllubin')
@@ -579,10 +582,13 @@ class DatasetSplit:
         dataset_configuration._init_bert()
 
 
-        rels_f=DatasetSplit.mod_rels(dataset_configuration.data.all_rel,strip_colon,ignored)
+        rels_f=dataset_configuration.data.all_rel
+
         if strip_colon:
             rels_f=[x.split(':')[0] for x in rels_f]
-            dataset_configuration.data.tokens=[DatasetSplit.strip_colon_token(x) for x in dataset_configuration.data.tokens if ':' in x['relation']]
+            dataset_configuration.data.tokens=[DatasetSplit.strip_colon_token(x) for x in dataset_configuration.data.tokens]
+
+        rels_f=DatasetSplit.mod_rels(rels_f,ignored=ignored)
         masks=DatasetSplit.split_n(dataset_configuration.data,rels_f,n,do_sort=do_sort)
 
         print(masks)
@@ -592,13 +598,14 @@ class DatasetSplit:
         dataset_configuration._unload_bert()
 
     @staticmethod
-    def mod_rels(rels,strip_colon: True, ignored={'punct', 'dep', 'dislocated', 'orphan', 'list', 'vocative', 'expl', 'flat'}):
+    def mod_rels(rels, ignored={'punct', 'dep', 'dislocated', 'orphan', 'list', 'vocative', 'expl', 'flat'}):
         rels=[x for x in rels if x not in ignored]
         return rels
 
     @staticmethod
     def strip_colon_token(token):
-        token["relation"]=token["relation"].split(':')[0]
+        if ':' in token['relation']:
+            token["relation"]=token["relation"].split(':')[0]
         return token
 
 

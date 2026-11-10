@@ -138,6 +138,7 @@ class BalancedSet:
     def prepare_sets_rels(self,k=2,test_size=0.03,exp_path='./',prefix='0',balance=all_balance_mathods): #split test,train
 
         X=self.dataset.sources
+        X=np.asarray(X)
 
         #1: squeeze targets
         y=[self.dataset.squeeze_result(t) for t in self.dataset.targets]
