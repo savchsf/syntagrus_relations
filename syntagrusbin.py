@@ -517,18 +517,16 @@ class DatasetSplit:
     def split_n(data,rels,n,do_sort=True):
         #возвращает маски all_rel
         all_rels=[x['relation'] for x in data.tokens if x['relation'] in rels]
-        all_rels=list(set(all_rels))
-        print(all_rels)
-        rels_n=[]
         if n<=1:
             #return [data]
-            return [all_rels]
+            return [rels]
         if n==2:
             return DatasetSplit.split_major_minor(len(all_rels),all_rels,do_sort=do_sort)
         else:
-            rels_2= DatasetSplit.split_major_minor(len(all_rels),all_rels,do_sort=do_sort)
-            rels_n.extend(DatasetSplit.split_n(data,rels_2[0],n//2,do_sort=do_sort))
-            rels_n.extend(DatasetSplit.split_n(data,rels_2[1],n//2+n%2,do_sort=do_sort))
+            rels_2 = DatasetSplit.split_major_minor(len(all_rels), all_rels, do_sort=do_sort)
+            rels_n = []
+            rels_n.extend(DatasetSplit.split_n(data, rels_2[0], n//2, do_sort=do_sort))
+            rels_n.extend(DatasetSplit.split_n(data, rels_2[1], n//2+n%2, do_sort=do_sort))
             return rels_n
 
     @staticmethod
@@ -576,8 +574,8 @@ class DatasetSplit:
             dataset_configuration.load_data(base)
 
         else:
-            datas=ConlluDataset.split_into_chunks(dataset_configuration.data,max_sen)
             dataset_configuration.load_data_from_file(fp)
+            datas=ConlluDataset.split_into_chunks(dataset_configuration.data,max_sen)
 
         dataset_configuration._init_bert()
 
@@ -591,7 +589,7 @@ class DatasetSplit:
         rels_f=DatasetSplit.mod_rels(rels_f,ignored=ignored)
         masks=DatasetSplit.split_n(dataset_configuration.data,rels_f,n,do_sort=do_sort)
 
-        print(masks)
+        print('masks',masks)
         for i in range(len(masks)):
             DatasetSplit.process_one(fp,dataset_configuration,masks[i],i,export_path,datas)
 

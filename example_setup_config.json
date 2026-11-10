@@ -1,13 +1,13 @@
 {
-    "exp_dir": "exp",
+    "exp_dir": "train_a",
     "dataset_path": "dataset/ru_syntagrus-ud-train-a.conllu",
-    "max_sentences":1000,
+    "max_sentences":500,
 
     "n_predictors":3,
     "do_sort_bin":true,
 
-    "batch_size":3000,
-    "batch_sentence":400,
+    "batch_size":2500,
+    "batch_sentence":300,
     "use_bert": true,
     "bert_name":"sergeyzh/rubert-mini-uncased",
     "unk_token":"_",
@@ -28,13 +28,13 @@
                 "NearMiss3","TomekLinks","RandomOversampling"
             ],
 
-    "test_size":0.3,
+    "test_size":0.1,
     "k":2,
 
     "model":"SVM",
-
+    "zero_threshold":0.1,
     "stages":[
-            "1","2","3","4"
+            "2","3","4"
     ]
 
 }
