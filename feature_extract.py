@@ -4,19 +4,16 @@ from natasha import (Doc,
 
 
 class FeatExtractor:
-    self.segmenter=Segmenter
-    self.emb=NewsEmbedding()
-    self.morph_tagger=NewsMorphTagger(emb)
+
 
     def __init__(self,unk_token='_'):
         self.unk_token=unk_token
-
-    def _segment(self,sen):
-        sen.segment(Segmenter)
-        return sen
+        self.segmenter=Segmenter()
+        self.emb=NewsEmbedding()
+        self.morph_tagger=NewsMorphTagger(self.emb)
 
     def info(self,word,sen_doc_segmented): #(pos, features)
-        sen_doc_segmented.tag_morph(morph_tagger)
+        sen_doc_segmented.tag_morph(self.morph_tagger)
         for token in sen_doc_segmented.tokens:
             if token.text.lower()==word.lower():
                 return (token.pos,token.feats)
@@ -48,3 +45,12 @@ class FeatExtractor:
     def sentence_len(self,sentence_doc):
         return len(sentence_doc.tokens)
 
+
+
+if __name__=="__main__":
+    sentence="Привет мир! Что"
+    w=['мир','что']
+    f=FeatExtractor()
+    doc=f.tokenize(sentence)
+    print([f.find_num(x,doc) for x in w])
+    print([(x,f.info(x,doc)) for x in w])
