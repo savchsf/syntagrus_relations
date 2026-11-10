@@ -48,7 +48,7 @@ class Models:
 
     def one_hot_class(self,vector,thr=0.1):
         value=np.argmax(vector)
-        if value<=thr:
+        if vector[value]<=thr:
             return 0
         return value+1
 
