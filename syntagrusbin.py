@@ -105,11 +105,16 @@ class SynTagRusBinarizer(Binarizer):
         self._reinit()
 
     def _reinit(self):
+        self.words = []
+        self.sentences = []
+        self.word_no = -1
+        self.sen_no = -1
+        self.sentence_emb_idx = None
         self._reinit_alls()
         self._sentence_cache_init()
         self._bag_of_words_cache_init()
         self._bag_of_words_rel_cache_init()
-        
+
 
     def _reinit_alls(self):
         self.all_features=self.data.all_features
@@ -233,26 +238,18 @@ class SynTagRusBinarizer(Binarizer):
         #singular np.array
 
     def return_bert(self):
-        curr_w=-1
-        word_bert=self._decode_bert(self.words)
-        #print(len(self.sources))
+        word_bert = self._decode_bert(self.words)
         if self.use_sentenceemb:
-            sen_bert=self._decode_bert(self.sentences,batch_size=self.sentence_batch)
+            sen_bert = self._decode_bert(self.sentences, batch_size=self.sentence_batch)
 
         for i in range(len(self.sources)):
-            #нужно уменьшить количество предложений
-            curr_w+=1
-            #w1
-            #print(curr_w)
-            self.sources[i][0]=word_bert[curr_w]
-            curr_w+=1
-            #w2
-            self.sources[i][1]=word_bert[curr_w]
-
+            w1_idx = int(self.sources[i][0][0])
+            w2_idx = int(self.sources[i][1][0])
+            self.sources[i][0] = word_bert[w1_idx]
+            self.sources[i][1] = word_bert[w2_idx]
             if self.use_sentenceemb:
-                val=self.sources[i][self.sentence_emb_idx][0]
-                #print(self.sentences[val])
-                self.sources[i][self.sentence_emb_idx]=sen_bert[val]
+                sen_idx = int(self.sources[i][self.sentence_emb_idx][0])
+                self.sources[i][self.sentence_emb_idx] = sen_bert[sen_idx]
 
 
     def _flatten_all(self):
@@ -280,8 +277,9 @@ class SynTagRusBinarizer(Binarizer):
 
     def generate_from_other_words_in_sentence(self,ratio=0.5):
         #этот работает с данными из парсера
-        n_new=math.ceil(len(self.data.tokens)*ratio)
-        selected_tokens=random.sample(self.data.tokens,k=n_new)
+        data_used=[x for x in self.data.tokens if x['relation'] in self.all_rel]
+        n_new=math.ceil(len(data_used)*ratio)
+        selected_tokens=random.sample(data_used,k=n_new)
 
         new_tokens=[self._GFOWIS(x) for x in selected_tokens]
 
@@ -402,13 +400,19 @@ class SynTagRusBinarizer(Binarizer):
         torch.save(self.sources,path+'_sources.pt')
         torch.save(self.targets,path+'_targets.pt')
 
-    def load(self,path):
+    def __load(self,path):
         loaded_data_s=torch.load(path+'_sources.pt',mmap=True,weights_only=False)
         loaded_data_t=torch.load(path+'_targets.pt',mmap=True,weights_only=False)
         self.sources=loaded_data_s
         self.targets=loaded_data_t
 
-    def merge_file(self,list_of_files_s,list_of_files_t,export_file):
+    def load(self,path):
+        loaded_data_s=np.load(path+'_sources.pt', mmap_mode='r')
+        loaded_data_t=np.load(path+'_targets.pt', mmap_mode='r')
+        self.sources=loaded_data_s
+        self.targets=loaded_data_t
+
+    def __merge_file(self,list_of_files_s,list_of_files_t,export_file):
         #torch
         list_of_files_s.sort()
         list_of_files_t.sort()
@@ -425,6 +429,42 @@ class SynTagRusBinarizer(Binarizer):
         torch.save(loaded_data_s,export_file+'_sources.pt')
         torch.save(loaded_data_t,export_file+'_targets.pt')
 
+    def merge_file(self, list_of_files_s, list_of_files_t, export_file):
+        list_of_files_s.sort()
+        list_of_files_t.sort()
+
+        self._merge_single_stream(list_of_files_s, export_file + '_sources.pt')
+        self._merge_single_stream(list_of_files_t, export_file + '_targets.pt')
+
+    def _merge_single_stream(self, file_list, output_path):
+        total_len = 0
+        sample_shape = None
+        dtype = None
+        for path in file_list:
+            data = torch.load(path, map_location='cpu', weights_only=False)
+            arr = np.asarray(data)
+            
+            if sample_shape is None:
+                sample_shape = arr.shape[1:]
+                dtype = arr.dtype
+            total_len += arr.shape[0]
+            del data, arr
+        final_shape = (total_len, *sample_shape)
+        fp = np.lib.format.open_memmap(
+            output_path, mode='w+', dtype=dtype, shape=final_shape
+        )
+
+        offset = 0
+        for path in file_list:
+            data = torch.load(path, map_location='cpu', weights_only=False)
+            arr = data.numpy() if torch.is_tensor(data) else np.asarray(data)
+            
+            fp[offset : offset + arr.shape[0]] = arr
+            offset += arr.shape[0]
+            del data, arr
+
+        fp.flush()
+        del fp
 
 
     def _pack_scheme(self):
@@ -542,13 +582,15 @@ class DatasetSplit:
             #print('Chunk',c,'/',len(data_chunks))
             dataset.sources=[]
             dataset.targets=[]
-            dataset.load_data(chunk)
+            curr_ch=copy.deepcopy(chunk)
+            dataset.load_data(curr_ch)
             dataset.all_rel=mask
             dataset.data.all_rel=mask
             dataset._bag_of_words_rel_cache_init()
             dataset.generate_dataset()
             dataset.save(f"{export_path}/tmp/{i}_{c}")
             c+=1
+            del curr_ch
 
         saved_files_s=glob(f"{export_path}/tmp/{i}_*sources.pt")
         saved_files_t=glob(f"{export_path}/tmp/{i}_*targets.pt")

@@ -4,6 +4,7 @@ from prepare_sets import BalancedSet
 from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
 
 import joblib
 
@@ -26,16 +27,29 @@ class Models:
         self.model=None
         self.scaler=scaler
 
-    def InitLogistic(self,max_iter=10000):
+    def InitLogistic(self,max_iter=10000,zero_weight=None):
+        weights = {0: zero_weight}
+        if zero_weight is None:
+            weights='balanced'
         #self.model=OneVsRestClassifier(LogisticRegression(max_iter=max_iter))
-        self.model = SGDClassifier(loss='log_loss', max_iter=max_iter, class_weight='balanced')
+        self.model = SGDClassifier(loss='log_loss', max_iter=max_iter, class_weight=weights)
 
-    def InitSVM(self,kernel='rbf',C=1.0):
-        self.model=OneVsRestClassifier(SVC(kernel=kernel, C=C, class_weight='balanced'))
+    def InitSVM(self,zero_weight=None):
+        weights = {0: zero_weight}
+        if zero_weight is None:
+            weights='balanced'
+        self.model = SGDClassifier(
+            loss='hinge', penalty='l2', alpha=1e-4,
+            class_weight=weights, max_iter=1000, tol=1e-3,
+            n_jobs=-1, random_state=42,
+        )
 
-    def train_model(self,X_train,y_train,scaled_X=True):
+    def train_model(self,X_train,y_train,scaled_X=True,thr=0.1):
         if not scaled_X:
-            X_train=self.scaler.fit_transform(X_train)
+            X_train=self.scaler.transform(X_train)
+
+        #print(y_train)
+        #y_train=np.asarray([self.one_hot_class(x,thr) for x in y_train])
 
         self.model.fit(X_train,y_train)
 
@@ -52,11 +66,13 @@ class Models:
             return 0
         return value+1
 
-    def evaluate_metric(self,y_test,y_pred,one_hot=True,thr=0.1):
+    def evaluate_metric(self,y_test,y_pred,one_hot=False,thr=0.1):
         
-        if one_hot:
+        '''if one_hot:
             y_test=np.asarray([self.one_hot_class(x,thr) for x in y_test])
-            y_pred=np.asarray([self.one_hot_class(x,thr) for x in y_pred])
+            y_pred=np.asarray([self.one_hot_class(x,thr) for x in y_pred])'''
+
+        y_pred=np.asarray([round(x) for x in y_pred])
 
         acc = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred, average='macro', zero_division=0)
@@ -83,14 +99,14 @@ class TrainModels:
             f.write(report)
 
     @staticmethod
-    def process_one(directory,prefix,type_,save_dir,thr=0.1):
+    def process_one(directory,prefix,type_,save_dir,thr=0.1,zero_weight=None,zero_weight_h=None):
         scaler = joblib.load(directory + f'/{prefix}_scaler.pkl')
         m=Models(scaler)
 
         if type_=='SVM':
-            m.InitSVM()
+            m.InitSVM(zero_weight=zero_weight[int(prefix)])
         elif type_=="Logistic":
-            m.InitLogistic()
+            m.InitLogistic(zero_weight=zero_weight[int(prefix)])
         else:
             raise NotImplementedError("Select a model (SVM or Logistic)")
 
@@ -105,10 +121,18 @@ class TrainModels:
         TrainModels.trainmodel(b,m,f'{directory}/{prefix}',save_path,head=False,thr=thr)
 
         if scheme['predict_head']:
+            
+            if type_=='SVM':
+                m.InitSVM(zero_weight=zero_weight_h[int(prefix)])
+            elif type_=="Logistic":
+                m.InitLogistic(zero_weight=zero_weight_h[int(prefix)])
+            else:
+                raise NotImplementedError("Select a model (SVM or Logistic)")
+
             TrainModels.trainmodel(b,m,f'{directory}/{prefix}_heads',save_path+'_heads',head=True)
 
-        shutil.copy(f'{directory}/{prefix}.json',save_path+'.json')
-        shutil.copy(f'{directory}/{prefix}_bow.json',save_path+'_bow.json')
+        shutil.copyfile(f'{directory}/{prefix}.json',save_path+'.json')
+        shutil.copyfile(f'{directory}/{prefix}_bow.json',save_path+'_bow.json')
 
     @staticmethod
     def get_prefixes(directory):
@@ -117,10 +141,10 @@ class TrainModels:
         return prefixes
 
     @staticmethod
-    def process_all(directory,type_,save_dir,thr=0.1):
+    def process_all(directory,type_,save_dir,thr=0.1,zero_weight=None,zero_weight_h=None):
         prefixes=TrainModels.get_prefixes(directory)
         for prefix in prefixes:
-            TrainModels.process_one(directory,prefix,type_,save_dir,thr=thr)
+            TrainModels.process_one(directory,prefix,type_,save_dir,thr=thr,zero_weight=zero_weight,zero_weight_h=zero_weight_h)
         
 
 if __name__=="__main__":

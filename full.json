@@ -1,0 +1,52 @@
+{
+    "exp_dir": "full3",
+    "dataset_path": "dataset/ru_syntagrus-ud-train-a - Copy.conllu",
+    "max_sentences":800,
+
+    "n_predictors":4,
+    "do_sort_bin":true,
+
+    "batch_size":3000,
+    "batch_sentence":600,
+    "use_bert": true,
+    "bert_name":"sergeyzh/rubert-mini-uncased",
+    "unk_token":"_",
+    "use_head":true,
+    "predict_head":true,
+    "use_pos":true,
+    "use_morph":true,
+    "use_sentenceemb":true,
+    "use_distance":false,
+    "use_s_no":false,
+    "binary":false,
+    "strip_colon": true,
+    "ignored": ["list","parataxis","dislocated","orphan","dep","punct","root"],
+
+
+    "scaler":"MinMaxScaler",
+    "methods":[
+              [],
+        [],
+        [],
+        []
+            ],
+
+    "head_methods":[
+        [],
+        [],
+        [],
+        []
+    ],
+
+    "test_size":0.2,
+    "k":2,
+
+    "model":"SVM",
+    "zero_weight": [null,2.0,2.0,2.0],
+    "zero_weight_h": [null,null,null,null],
+    "zero_threshold":0.1,
+    "stages":[
+          "1","2","3","4"
+    ]
+
+}

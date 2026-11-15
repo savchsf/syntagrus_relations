@@ -52,12 +52,12 @@ def main():
                 raise ValueError("Select a valid scaler")
 
 
-        DatasetBalance.process_all(exp_d+'/binarized_data', exp_d+'/balanced_data', scaler=scaler, test_size=config["test_size"], k=config["k"], balance=config["methods"])
+        DatasetBalance.process_all(exp_d+'/binarized_data', exp_d+'/balanced_data', scaler=scaler, test_size=config["test_size"], k=config["k"], balance=config["methods"],h_balance=config["head_methods"])
         print("Balanced!")
 
     if "4" in config["stages"]:
         print("4. Training...")
-        TrainModels.process_all(exp_d+'/balanced_data',config["model"],exp_d+'/results',thr=config['zero_threshold'])
+        TrainModels.process_all(exp_d+'/balanced_data',config["model"],exp_d+'/results',thr=config['zero_threshold'],zero_weight=config['zero_weight'],zero_weight_h=config['zero_weight_h'])
         print('Trained!')
 
 
