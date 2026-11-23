@@ -1,9 +1,19 @@
 {
-    "exp_dir": "full3",
-    "dataset_path": "dataset/ru_syntagrus-ud-train-a - Copy.conllu",
+    "exp_dir": "testt",
+    "dataset_path": ["dataset/ru_syntagrus-ud-train-a.conllu","dataset/ru_syntagrus-ud-train-b.conllu","dataset/ru_syntagrus-ud-train-c.conllu"],
+    "val_dataset_path": "dataset/ru_syntagrus-ud-test.conllu",
     "max_sentences":800,
 
-    "n_predictors":4,
+    "datasets_subdir":"conllu_parts",
+    "binarized_subdir":"binarized_data",
+
+    "datasets_subdir_val":"conllu_parts",
+    "binarized_subdir_val":"binarized_data",
+
+    "balanced_subdir":"balanced_data",
+    "models_subdir":"result",
+
+    "n_predictors":6,
     "do_sort_bin":true,
 
     "batch_size":3000,
@@ -13,40 +23,40 @@
     "unk_token":"_",
     "use_head":true,
     "predict_head":true,
-    "use_pos":true,
-    "use_morph":true,
+    "use_pos":false,
+    "use_morph":false,
     "use_sentenceemb":true,
     "use_distance":false,
     "use_s_no":false,
     "binary":false,
-    "strip_colon": true,
-    "ignored": ["list","parataxis","dislocated","orphan","dep","punct","root"],
+    "strip_colon": false,
+    "ignored": ["root"],
 
 
     "scaler":"MinMaxScaler",
     "methods":[
               [],
         [],
-        [],
-        []
+        ["NearMiss3"],
+        ["TomekLinks"], ["ADASYN"], ["SMOTE"]
             ],
 
     "head_methods":[
         [],
         [],
-        [],
-        []
+        ["RandomUnderSampler"],
+        ["RandomUnderSampler"], ["RandomOverSampler"], ["RandomOverSampler"]
     ],
 
     "test_size":0.2,
     "k":2,
 
     "model":"SVM",
-    "zero_weight": [null,2.0,2.0,2.0],
-    "zero_weight_h": [null,null,null,null],
+    "zero_weight": [6.0,6.0,6.0,6.0,6.0,6.0],
+    "zero_weight_h": [null,null,null,null,null,null],
     "zero_threshold":0.1,
     "stages":[
-          "1","2","3","4"
+          "1"
     ]
 
 }

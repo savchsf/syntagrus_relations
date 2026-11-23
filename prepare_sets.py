@@ -23,6 +23,7 @@ import shutil
 
 from collections import Counter
 
+from general_utils import get_prefixes
 
 all_balance_mathods=["NearMiss1","NearMiss2","NearMiss3",
                      'TomekLinks',"RandomUnderSampler","EditedNearestNeighbours",
@@ -45,7 +46,7 @@ class BalancedSet:
             return json.load(f)
 
 
-    def load_from_scheme_for_eval(self,scheme,data_path):
+    def load_from_scheme_for_eval(self,scheme,data_path,data_path_val):
         scheme=self.load_scheme(scheme)
         bname=None
         if scheme['use_bert']:
@@ -64,6 +65,8 @@ class BalancedSet:
         self.dataset.all_rel=scheme['outputs']
 
         self.dataset.load(data_path)
+
+        self.dataset_val.load(data_path_val)
 
     def _NearM(self,k=2,ver=3):
         nm3 = NearMiss(version=ver, n_neighbors=k)
@@ -160,24 +163,28 @@ class BalancedSet:
         y=[self.dataset.squeeze_result(t) for t in self.dataset.targets]
         y=np.asarray(y)
 
-        counts = Counter(y)
-        single_classes = [cls for cls, count in counts.items() if count == 1]
-
-        if single_classes:
-            mask = np.isin(y, single_classes)
-            X = np.concatenate([X, X[mask]], axis=0)
-            y = np.concatenate([y, y[mask]], axis=0)
-
         #2: train test
-        self.X_train,self.X_test,self.y_train,self.y_test=train_test_split(X,y,test_size=test_size,stratify=y)
+        #self.X_train,self.X_test,self.y_train,self.y_test=train_test_split(X,y,test_size=test_size,stratify=y)s\
+
+        self.X_train=X
+        self.y_train=y
+
+        X=self.dataset_val.sources
+        X=np.asarray(X, dtype=np.float32)
+        y=self.dataset_val.targets
+        y=np.asarray(y)
+
+        self.X_test=X
+        self.y_test=y
+
         #3: scale train
         self.X_train=self.scaler.fit_transform(self.X_train)
         #4: balance train
         self.do_balance(k=k,methods=balance)
     
         #5: unsqueeze targets
-        #self.y_train=[self.dataset.depickle_result(x) for x in self.y_train]
-        #self.y_test=[self.dataset.depickle_result(x) for x in self.y_test]
+        self.y_train=[self.dataset.depickle_result(x) for x in self.y_train]
+        self.y_test=[self.dataset.depickle_result(x) for x in self.y_test]
 
         #return
         self.finalize(exp_path+'/'+prefix)
@@ -212,7 +219,7 @@ class BalancedSet:
 
         os.makedirs(exp_path,exist_ok=True)
 
-        self.load_from_scheme_for_eval(scheme,data_path)
+        self.load_from_scheme_for_eval(scheme,data_path,data_path_val)
         self.prepare_sets_rels(k,test_size,exp_path,prefix,balance=balance)
 
         if self.dataset.predict_head:
@@ -243,17 +250,12 @@ class DatasetBalance:
         shutil.copyfile(gen_path+'.json',exp_path+'/'+prefix+'.json')
         shutil.copyfile(gen_path+'_bow.json',exp_path+'/'+prefix+'_bow.json')
 
-    @staticmethod
-    def get_prefixes(directory):
-        paths=glob(directory+'/*.json') #counting prefixes by json
-        prefixes=[x.split('/')[-1].replace('.json','') for x in list(paths) if '_bow' not in x]
-        return prefixes
 
     @staticmethod
     def process_all(directory,exp_path,
                     scaler,test_size=0.3,k=2,balance=None, h_balance=None
                     ):
-        prefixes=DatasetBalance.get_prefixes(directory)
+        prefixes=get_prefixes(directory)
 
         if balance is None:
             balance=[]*len(prefixes)

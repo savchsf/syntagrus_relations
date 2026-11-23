@@ -21,6 +21,8 @@ from glob import glob
 
 import os
 
+from general_utils import get_prefixes
+
 class Models:
 
     def __init__(self,scaler):
@@ -31,18 +33,14 @@ class Models:
         weights = {0: zero_weight}
         if zero_weight is None:
             weights='balanced'
-        #self.model=OneVsRestClassifier(LogisticRegression(max_iter=max_iter))
-        self.model = SGDClassifier(loss='log_loss', max_iter=max_iter, class_weight=weights)
+        self.model=OneVsRestClassifier(LogisticRegression(max_iter=max_iter))
+        #self.model = SGDClassifier(loss='log_loss', max_iter=max_iter, class_weight=weights)
 
     def InitSVM(self,zero_weight=None):
         weights = {0: zero_weight}
         if zero_weight is None:
             weights='balanced'
-        self.model = SGDClassifier(
-            loss='hinge', penalty='l2', alpha=1e-4,
-            class_weight=weights, max_iter=1000, tol=1e-3,
-            n_jobs=-1, random_state=42,
-        )
+        self.model=OneVsRestClassifier(SVC(kernel='rbf',C=1.0,gamma='scale'))
 
     def train_model(self,X_train,y_train,scaled_X=True,thr=0.1):
         if not scaled_X:
@@ -66,13 +64,14 @@ class Models:
             return 0
         return value+1
 
-    def evaluate_metric(self,y_test,y_pred,one_hot=False,thr=0.1):
+    def evaluate_metric(self,y_test,y_pred,one_hot=True,thr=0.1,classes_str=['None']):
         
-        '''if one_hot:
+        if one_hot:
             y_test=np.asarray([self.one_hot_class(x,thr) for x in y_test])
-            y_pred=np.asarray([self.one_hot_class(x,thr) for x in y_pred])'''
-
-        y_pred=np.asarray([round(x) for x in y_pred])
+            y_pred=np.asarray([self.one_hot_class(x,thr) for x in y_pred])
+        
+        else:
+            y_pred=np.asarray([round(x) for x in y_pred])
 
         acc = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred, average='macro', zero_division=0)
@@ -133,16 +132,13 @@ class TrainModels:
 
         shutil.copyfile(f'{directory}/{prefix}.json',save_path+'.json')
         shutil.copyfile(f'{directory}/{prefix}_bow.json',save_path+'_bow.json')
-
-    @staticmethod
-    def get_prefixes(directory):
-        paths=glob(directory+'/*.json') #counting prefixes by json
-        prefixes=[x.split('/')[-1].replace('.json','') for x in list(paths) if '_bow' not in x]
-        return prefixes
+        shutil.copyfile(f'{directory}/{prefix}_scaler.pkl',save_path+'_scaler.pkl')
+        #
+        
 
     @staticmethod
     def process_all(directory,type_,save_dir,thr=0.1,zero_weight=None,zero_weight_h=None):
-        prefixes=TrainModels.get_prefixes(directory)
+        prefixes=get_prefixes(directory)
         for prefix in prefixes:
             TrainModels.process_one(directory,prefix,type_,save_dir,thr=thr,zero_weight=zero_weight,zero_weight_h=zero_weight_h)
         

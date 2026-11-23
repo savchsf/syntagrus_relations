@@ -30,39 +30,50 @@ class ConlluDataset:
     def _parse_word(self,line:str, sentence_no:int):
         #line: 8	специалистов	специалист	NOUN	_	Animacy=Anim|Case=Gen|Gender=Masc|Number=Plur	5	nmod	5:nmod:gen	_
         features=line.split('\t') #len=10
-        if features[1]==self.unk_token:
+        if features[1]==self.unk_token or '.' in features[0]:
             return {}
 
+        self.word_no+=1
+        
+
         return {
-            'no_in_sentence': int(features[0]),
-            'word': features[1],
-            'lemma': features[2],
-            'pos': features[3],
-            'xpos': features[4], #not used
-            'features': self._split_features(features[5]),
-            'head': int(features[6]),
-            'relation': features[7],
-            'parent:relation': features[8],
-            'extra': features[9],
-            'sentence': sentence_no
-        }
+                'no_in_sentence': int(features[0]),
+                'word': features[1],
+                'lemma': features[2],
+                'pos': features[3],
+                'xpos': features[4], #not used
+                'features': self._split_features(features[5]),
+                'head': int(features[6]),
+                'relation': features[7],
+                'parent:relation': features[8],
+                'extra': features[9],
+                'sentence': sentence_no
+            }
+
+    def _proc_line(self,line):
+        line=line.strip()
+        self.word_no=0
+        if line:
+            if line.startswith('# text = '):
+                line=line.replace('# text = ','')
+                self.sentences.append(line)
+                self.curr_s+=1
+            elif line[0]!='#':
+                parse_res=self._parse_word(line,self.curr_s)
+                if parse_res:
+                    self.tokens.append(parse_res)
+        del self.word_no
+
+    def _proc_lines(self,lines):
+        self.curr_s=-1
+        for line in lines:
+            self._proc_line(line)
+        del self.curr_s
 
     def _parse_file(self,fp):
-
-        curr_s=-1
-
         with open(fp, encoding='utf-8') as f:
-            for line in f:
-                line=line.strip()
-                if line:
-                    if line.startswith('# text = '):
-                        line=line.replace('# text = ','')
-                        self.sentences.append(line)
-                        curr_s+=1
-                    elif line[0]!='#':
-                        parse_res=self._parse_word(line,curr_s)
-                        if parse_res:
-                            self.tokens.append(parse_res)
+            lines=f.readlines()
+            self._proc_lines(lines)
 
     def _find_all_features(self):
         for word in self.tokens:
@@ -88,8 +99,13 @@ class ConlluDataset:
         return sorted(set(x[k] for x in d))
 
     def compute(self,fp):
-        self._parse_file(fp)
+        if isinstance(fp, str):
+            self._parse_file(fp)
+        else:
+            lines=self.append_multiple(fp)
+            self._proc_lines(lines)
         self.reinit()
+
 
     def reinit(self):
         self._find_all_features()
@@ -163,12 +179,73 @@ class ConlluDataset:
 
         return datas
 
+    @staticmethod
+    def append_multiple(files):
+        text=''
+        for i in files:
+            with open(i,encoding='utf-8') as f:
+                for i in f:
+                    text+=i
+        text=text.split('\n')
+        return text
+
+    @staticmethod
+    def convert_request(req):
+        '''
+        # sent_id = 2003Anketa.xml_2
+        # text = Начальник областного управления связи Семен Еремеевич был человек простой, приходил на работу всегда вовремя, здоровался с секретаршей за руку и иногда даже писал в стенгазету заметки под псевдонимом "Муха".
+        1	Начальник	начальник	NOUN	_	Animacy=Anim|Case=Nom|Gender=Masc|Number=Sing	8	nsubj	8:nsubj	_
+        2	областного	областной	ADJ	_	Case=Gen|Degree=Pos|Gender=Neut|Number=Sing	3	amod	3:amod	_
+        3	управления	управление	NOUN	_	Animacy=Inan|Case=Gen|Gender=Neut|Number=Sing	1	nmod	1:nmod:gen	_
+        4	связи	связь	NOUN	_	Animacy=Inan|Case=Gen|Gender=Fem|Number=Sing	3	nmod	3:nmod:gen	_
+        5	Семен	Семен	PROPN	_	Animacy=Anim|Case=Nom|Gender=Masc|NameType=Giv|Number=Sing	1	appos	1:appos	_
+        '''
+
+        lines=[]
+        lines.append(f"# text = {req['sentence']}")
+        curr_p=1
+        words=req['wordPositions']
+        root_pos=0
+        #dep_pos=0
+        w1=[]
+        w2=[]
+        for word in words:
+            word=word[0] #is list necessary
+            if "link" in word.keys():
+                feats=word['FEAT'][1:] #not vlear
+                if len(feats)==0:
+                    feats='_'
+                else:
+                    feats=feats[0]
+                w=[curr_p,word['word'],'_',word['FEAT'][0],'_',feats,0,word['link'],'_','_']
+                if 'dep_word' in word.keys():
+                    #dep_pos=curr_p
+                    w1=w
+                if 'main_word' in word.keys():
+                    root_pos=curr_p
+                    w[-3]='_'
+                    w2=w
+                
+            else:
+                header=f"{curr_p}\t"
+                header+='\t'.join(['_']*9)
+                lines.append(header)
+            curr_p+=1
+
+        w1[6]=root_pos
+        lines.append('\t'.join(w1))
+        lines.append('\t'.join(w2))
+        return lines
+
+
+        
+
 d=ConlluDataset()
-d.compute('dataset/ru_syntagrus-ud-train-a.conllu')
+d.compute(['dataset/ru_syntagrus-ud-train-a.conllu','dataset/ru_syntagrus-ud-train-b.conllu'])
 
 
 if __name__=='__main__':
-    print(d.tokens[88]['features'])
+    print(d.tokens[4]['features'])
     print(d.all_features)
     datas=ConlluDataset.split_into_chunks(d,500,'train_a/conllu_parts')
     print(len(datas))

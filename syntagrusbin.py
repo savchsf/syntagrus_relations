@@ -356,8 +356,6 @@ class SynTagRusBinarizer(Binarizer):
                 self._init_bert()
 
             if (self.use_head or self.predict_head) and self.use_sentenceemb:
-                ratio=ratio/3
-            elif (self.use_head or self.predict_head) and not self.use_sentenceemb:
                 ratio=ratio/2
 
             if self.use_sentenceemb:
@@ -379,7 +377,7 @@ class SynTagRusBinarizer(Binarizer):
                 self.return_bert()
 
             if self.use_head or self.predict_head:
-                self.generate_negative_heads(ratio)
+                #self.generate_negative_heads(ratio) doesn't make sense 
                 self.generate_new_head(ratio)
 
             if do_shuffle:
@@ -607,7 +605,7 @@ class DatasetSplit:
 
 
     @staticmethod
-    def make_multiple_datasets(dataset_configuration,fp=None,n=3,export_path='.',do_sort=True,max_sen=400,chunks_dir=None,ignored=[],strip_colon=True):
+    def make_multiple_datasets(dataset_configuration,fp=None,n=3,export_path='.',do_sort=True,max_sen=400,chunks_dir=None,ignored=[],strip_colon=True,val_chunks=None,export_val='.'):
 
         if chunks_dir is not None:
             lst_ch=glob(chunks_dir+'/*.conllubin')
@@ -619,6 +617,11 @@ class DatasetSplit:
             dataset_configuration.load_data_from_file(fp)
             datas=ConlluDataset.split_into_chunks(dataset_configuration.data,max_sen)
 
+        if val_chunks is not None:
+            lst_ch=glob(val_chunks+'/*.conllubin')
+            datas_val=[joblib.load(x) for x in lst_ch if 'template' not in x]
+            base_val=[joblib.load(x) for x in lst_ch if 'template' in x][0]
+
         dataset_configuration._init_bert()
 
 
@@ -627,6 +630,7 @@ class DatasetSplit:
         if strip_colon:
             rels_f=[x.split(':')[0] for x in rels_f]
             dataset_configuration.data.tokens=[DatasetSplit.strip_colon_token(x) for x in dataset_configuration.data.tokens]
+            
 
         rels_f=DatasetSplit.mod_rels(rels_f,ignored=ignored)
         masks=DatasetSplit.split_n(dataset_configuration.data,rels_f,n,do_sort=do_sort)
@@ -634,6 +638,7 @@ class DatasetSplit:
         print('masks',masks)
         for i in range(len(masks)):
             DatasetSplit.process_one(fp,dataset_configuration,masks[i],i,export_path,datas)
+            DatasetSplit.process_one(fp,dataset_configuration,masks[i],i,export_val,datas_val)
 
         dataset_configuration._unload_bert()
 

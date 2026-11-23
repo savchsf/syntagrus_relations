@@ -1,0 +1,40 @@
+{
+    "exp_dir": "quater",
+    "dataset_path": "dataset/quater.conllu",
+    "max_sentences":800,
+
+    "n_predictors":3,
+    "do_sort_bin":true,
+
+    "batch_size":3000,
+    "batch_sentence":600,
+    "use_bert": true,
+    "bert_name":"sergeyzh/rubert-mini-uncased",
+    "unk_token":"_",
+    "use_head":true,
+    "predict_head":true,
+    "use_pos":true,
+    "use_morph":true,
+    "use_sentenceemb":true,
+    "use_distance":true,
+    "use_s_no":true,
+    "binary":false,
+    "strip_colon": true,
+    "ignored": ["list","parataxis","dislocated","orphan","dep","punct"],
+
+
+    "scaler":"MinMaxScaler",
+    "methods":[
+              
+            ],
+
+    "test_size":0.05,
+    "k":2,
+
+    "model":"SVM",
+    "zero_threshold":0.1,
+    "stages":[
+           "3","4"
+    ]
+
+}
