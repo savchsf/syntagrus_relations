@@ -10,14 +10,19 @@ import os
 import numpy as np
 from collections import Counter
 
+import shutil
+from glob import glob
+
+import joblib
+
+from tqdm import tqdm
+
 class SynTagRusBinarizer(Binarizer):
-    def __init__(self,use_bert=True,bert_name='sergeyzh/rubert-large-uncased-sts',
+    def __init__(self,use_bert=True,bert_name='sergeyzh/rubert-mini-uncased',
     batch_size=32,unk_token='_',
     use_head=True, predict_head=True, use_pos=True, use_morph=True,
     use_sentenceemb=True, use_s_no=True, use_distance=True, binary=False,sentence_batch=4
     ):
-        #новая стратегия: все признаки всегда кодируются как one_hot. Голова всегда последняя.abs
-        #переброс головы случится после балансировки, которая проводится перед тренировкой в отдельном файле (и для сурсов, и для таргетов)
         super().__init__(use_bert,bert_name)
         self.sources=[]
         self.targets=[]
@@ -69,14 +74,7 @@ class SynTagRusBinarizer(Binarizer):
 
         self.sentence_batch=sentence_batch
 
-
-
     def _bag_of_words_cache_init(self):
-        '''
-        self.bow_words={} #word:idx
-        self.bow_pos={} #pos:idx
-        self.bow_features={}
-        '''
         self.bow_words = {x: i +1 for i, x in enumerate(self.all_words)}
         self.bow_pos = {x: i +1 for i, x in enumerate(self.all_pos)}
         self.bow_features = {x: i +1 for i, x in enumerate(self.all_features)}
@@ -107,11 +105,16 @@ class SynTagRusBinarizer(Binarizer):
         self._reinit()
 
     def _reinit(self):
+        self.words = []
+        self.sentences = []
+        self.word_no = -1
+        self.sen_no = -1
+        self.sentence_emb_idx = None
         self._reinit_alls()
         self._sentence_cache_init()
         self._bag_of_words_cache_init()
         self._bag_of_words_rel_cache_init()
-        
+
 
     def _reinit_alls(self):
         self.all_features=self.data.all_features
@@ -136,9 +139,6 @@ class SynTagRusBinarizer(Binarizer):
             self.word_no+=1
             return self.word_no
         return self._bag_of_words_item(word,self.bow_words)
-
-    '''def _encode_discr(self,elem,all_elems):
-        return self._one_hot(elem,all_elems)'''
 
     def _pair_word(self,w1,w2):
         w1_emb=self._encode_word(w1['word'])
@@ -165,8 +165,9 @@ class SynTagRusBinarizer(Binarizer):
         return w1_no, w2_no
 
     def _encode_sentence(self,sentence):
-        self.sentences.append(sentence)
-        self.sen_no+=1
+        if len(self.sentences)==0 or self.sentences[-1]!=sentence:
+            self.sentences.append(sentence)
+            self.sen_no+=1
         return [np.array([self.sen_no])]
 
     def _decode_bert(self,lst,batch_size=None):
@@ -237,26 +238,19 @@ class SynTagRusBinarizer(Binarizer):
         #singular np.array
 
     def return_bert(self):
-        curr_w=-1
-        curr_s=-1
-        word_bert=self._decode_bert(self.words)
-        #print(len(self.sources))
+        word_bert = self._decode_bert(self.words)
         if self.use_sentenceemb:
-            sen_bert=self._decode_bert(self.sentences,batch_size=self.sentence_batch)
+            sen_bert = self._decode_bert(self.sentences, batch_size=self.sentence_batch)
 
         for i in range(len(self.sources)):
-            curr_w+=1
-            #w1
-            #print(curr_w)
-            self.sources[i][0]=word_bert[curr_w]
-            curr_w+=1
-            #w2
-            self.sources[i][1]=word_bert[curr_w]
-
+            w1_idx = int(self.sources[i][0][0])
+            w2_idx = int(self.sources[i][1][0])
+            self.sources[i][0] = word_bert[w1_idx]
+            self.sources[i][1] = word_bert[w2_idx]
             if self.use_sentenceemb:
-                curr_s+=1
-                self.sources[i][self.sentence_emb_idx]=sen_bert[curr_s]
-    
+                sen_idx = int(self.sources[i][self.sentence_emb_idx][0])
+                self.sources[i][self.sentence_emb_idx] = sen_bert[sen_idx]
+
 
     def _flatten_all(self):
         for i in range(len(self.sources)):
@@ -271,7 +265,7 @@ class SynTagRusBinarizer(Binarizer):
         new_token=copy.deepcopy(token)
 
         sentence_n=new_token['sentence']
-        new_token['rel']=self.unk_token
+        new_token['relation']=self.unk_token
 
         #select
         others=[x for x in self.sentence_tokens_cache[sentence_n] if x!=token]
@@ -283,8 +277,9 @@ class SynTagRusBinarizer(Binarizer):
 
     def generate_from_other_words_in_sentence(self,ratio=0.5):
         #этот работает с данными из парсера
-        n_new=math.ceil(len(self.data.tokens)*ratio)
-        selected_tokens=random.sample(self.data.tokens,k=n_new)
+        data_used=[x for x in self.data.tokens if x['relation'] in self.all_rel]
+        n_new=math.ceil(len(data_used)*ratio)
+        selected_tokens=random.sample(data_used,k=n_new)
 
         new_tokens=[self._GFOWIS(x) for x in selected_tokens]
 
@@ -299,7 +294,7 @@ class SynTagRusBinarizer(Binarizer):
     def generate_negative_heads(self,ratio=0.5):
         #работает со списками из np.array
         n_new=math.ceil(len(self.targets)*ratio)
-        print(n_new)
+        #print(n_new)
         selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
         res_s=[]
         res_t=[]
@@ -309,6 +304,19 @@ class SynTagRusBinarizer(Binarizer):
             res_t.append(ct)
         self.sources.extend(res_s)
         self.targets.extend(res_t)
+
+    def generate_new_head(self,ratio=0.3):
+        n_new=math.ceil(len(self.targets)*ratio)
+        selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
+        res_s=[]
+        res_t=[]
+        for i in selected_indices:
+            cs,ct=self._invert_head(self.sources[i],self.targets[i])
+            res_s.append(cs)
+            res_t.append(ct)
+        self.sources.extend(res_s)
+        self.targets.extend(res_t)
+
 
     #------SHUFFLE------
 
@@ -338,75 +346,127 @@ class SynTagRusBinarizer(Binarizer):
         self.sources.extend(res_s)
         self.targets.extend(res_t)
 
-    def transfer_head_one(self,i):
-        self.targets[i] = np.concatenate((self.targets[i],np.asarray([self.sources[i][-1]])))
-        if not self.use_head:
-            self.sources[i] = self.sources[i][:-1]
+    def generate_dataset(self,ratio=0.3,do_shuffle=True):
 
-
-    def transfer_head(self):
-        for i in range(len(self.targets)):
-            self.transfer_head_one(i)
-
-    def generate_dataset(self,ratio=0.3,do_shuffle=True): #head still not
-        if self.use_bert and not self.bert_inited:
-            self._init_bert()
-
-        if (self.use_head or self.predict_head) and self.use_sentenceemb:
-            ratio=ratio/2
-
-        if self.use_sentenceemb:
-            self.generate_from_other_words_in_sentence(ratio)
-        
-        c=-1
         non_root=len([x for x in self.data.tokens if x['head']!=0 and x['relation'] in self.all_rel])
 
-        for t in self.data.tokens:
-            if t['head']!=0 and (t['relation'] in self.all_rel or t['relation']==self.unk_token):
-                self.sources.append(self.generate_source(t))
-                self.targets.append(self.generate_target(t))
-                c+=1
-                if c%1000==0:
-                    print('Processed (no bert)',c+1,'/',non_root)
+        if non_root>0:
 
-        
+            if self.use_bert and not self.bert_inited:
+                self._init_bert()
 
-        if self.use_bert and self.bert_inited:
-            self.return_bert()
-            self._unload_bert()
+            if (self.use_head or self.predict_head) and self.use_sentenceemb:
+                ratio=ratio/2
 
-        if self.use_head or self.predict_head:
-            self.generate_negative_heads(ratio)
+            if self.use_sentenceemb:
+                self.generate_from_other_words_in_sentence(ratio)
 
-        if do_shuffle:
-            self.shuffle_data()
+            c=-1
+
+
+            for t in tqdm(self.data.tokens, desc="Processing (no bert)", unit="samples"):
+                if t['head']!=0 and (t['relation'] in self.all_rel or t['relation']==self.unk_token):
+                    self.sources.append(self.generate_source(t))
+                    #print(self.bow_rel)
+                    self.targets.append(self.generate_target(t))
+                    c+=1
+                    #if c%1000==0:
+                    #    print('Processed (no bert)',c+1,'/',non_root)
+
+            if self.use_bert and self.bert_inited:
+                self.return_bert()
+
             if self.use_head or self.predict_head:
-                self.shuffle_head()
+                #self.generate_negative_heads(ratio) doesn't make sense 
+                self.generate_new_head(ratio)
 
-        self._flatten_all()
-        self._clear_cache()
+            if do_shuffle:
+                self.shuffle_data()
+                if self.use_head or self.predict_head:
+                    self.shuffle_head()
 
-        if self.predict_head:
-            self.transfer_head()
+            self._flatten_all()
+            self._clear_cache()
+
+            '''if self.predict_head:
+                self.transfer_head()'''
 
         self.sources=np.asarray(self.sources)
         self.targets=np.asarray(self.targets)
 
-    def save(self,path): 
-        export_data={
-            "sources":self.sources,
-            "targets":self.targets
-        }
-        torch.save(export_data,path)
+    def save(self,path):
+        torch.save(self.sources,path+'_sources.pt')
+        torch.save(self.targets,path+'_targets.pt')
+
+    def __load(self,path):
+        loaded_data_s=torch.load(path+'_sources.pt',mmap=True,weights_only=False)
+        loaded_data_t=torch.load(path+'_targets.pt',mmap=True,weights_only=False)
+        self.sources=loaded_data_s
+        self.targets=loaded_data_t
 
     def load(self,path):
-        loaded_data=torch.load(path,weights_only=False)
-        self.sources=loaded_data['sources']
-        self.targets=loaded_data['targets']
+        loaded_data_s=np.load(path+'_sources.pt', mmap_mode='r')
+        loaded_data_t=np.load(path+'_targets.pt', mmap_mode='r')
+        self.sources=loaded_data_s
+        self.targets=loaded_data_t
 
+    def __merge_file(self,list_of_files_s,list_of_files_t,export_file):
+        #torch
+        list_of_files_s.sort()
+        list_of_files_t.sort()
+
+        loaded_data_s=[]
+        loaded_data_t=[]
+        for path in list_of_files_s:
+            tmp_load=torch.load(path,weights_only=False)
+            loaded_data_s.extend(tmp_load.tolist())
+        for path in list_of_files_t:
+            tmp_load=torch.load(path,weights_only=False)
+            loaded_data_t.extend(tmp_load.tolist())
+
+        torch.save(loaded_data_s,export_file+'_sources.pt')
+        torch.save(loaded_data_t,export_file+'_targets.pt')
+
+    def merge_file(self, list_of_files_s, list_of_files_t, export_file):
+        list_of_files_s.sort()
+        list_of_files_t.sort()
+
+        self._merge_single_stream(list_of_files_s, export_file + '_sources.pt')
+        self._merge_single_stream(list_of_files_t, export_file + '_targets.pt')
+
+    def _merge_single_stream(self, file_list, output_path):
+        total_len = 0
+        sample_shape = None
+        dtype = None
+        for path in file_list:
+            data = torch.load(path, map_location='cpu', weights_only=False)
+            arr = np.asarray(data)
+            
+            if sample_shape is None:
+                sample_shape = arr.shape[1:]
+                dtype = arr.dtype
+            total_len += arr.shape[0]
+            del data, arr
+        final_shape = (total_len, *sample_shape)
+        fp = np.lib.format.open_memmap(
+            output_path, mode='w+', dtype=dtype, shape=final_shape
+        )
+
+        offset = 0
+        for path in file_list:
+            data = torch.load(path, map_location='cpu', weights_only=False)
+            arr = data.numpy() if torch.is_tensor(data) else np.asarray(data)
+            
+            fp[offset : offset + arr.shape[0]] = arr
+            offset += arr.shape[0]
+            del data, arr
+
+        fp.flush()
+        del fp
 
 
     def _pack_scheme(self):
+
         scheme={
             "use_bert":self.use_bert,
             "use_pos":self.use_pos,
@@ -429,10 +489,7 @@ class SynTagRusBinarizer(Binarizer):
             for i in range(len(all_rel)-1):
                 scheme["outputs"][i]=self.all_rel[i]
 
-        scheme["all_words"]=self.all_words
-        scheme["all_pos"]=self.all_pos
-        scheme["all_rel"]=self.all_rel
-        scheme["all_features"]=self.all_features
+
 
         self.scheme=scheme
 
@@ -440,14 +497,20 @@ class SynTagRusBinarizer(Binarizer):
         with open(path,'w',encoding='utf-8') as f:
             json.dump(self.scheme,f,indent=4)
 
+    def export_bow(self,path):
+        bow=dict()
+        bow["all_words"]=self.all_words
+        bow["all_pos"]=self.all_pos
+        bow["all_rel"]=self.all_rel
+        bow["all_features"]=self.all_features
+
+        with open(path,'w',encoding='utf-8') as f:
+            json.dump(bow,f,indent=4)
+
 
     #test?
     def squeeze_result(self,target):
         value=0
-        if self.predict_head:
-            if target[-1]>0:
-                value+=len(target)
-            target=target[:-1]
         if np.sum(target)==0:
             return value
         value+=np.argmax(target)+1
@@ -458,17 +521,12 @@ class SynTagRusBinarizer(Binarizer):
             length=len(self.all_rel)
         else:
             length=1
-        if self.predict_head:
-            length+=1
         vector=np.zeros(length)
-        if self.predict_head:
-            if value>=length:
-                value-=length
-                vector[-1]=1
         if value==0:
             return vector
         vector[value-1]=1
         return vector
+
 
 class DatasetSplit:
 
@@ -497,49 +555,109 @@ class DatasetSplit:
     def split_n(data,rels,n,do_sort=True):
         #возвращает маски all_rel
         all_rels=[x['relation'] for x in data.tokens if x['relation'] in rels]
-        rels_n=[]
         if n<=1:
             #return [data]
             return [rels]
         if n==2:
             return DatasetSplit.split_major_minor(len(all_rels),all_rels,do_sort=do_sort)
         else:
-            rels_2= DatasetSplit.split_major_minor(len(all_rels),all_rels,do_sort=do_sort)
-            rels_n.extend(DatasetSplit.split_n(data,rels_2[0],n//2+n%2,do_sort=do_sort))
-            rels_n.extend(DatasetSplit.split_n(data,rels_2[1],n//2,do_sort=do_sort))
+            rels_2 = DatasetSplit.split_major_minor(len(all_rels), all_rels, do_sort=do_sort)
+            rels_n = []
+            rels_n.extend(DatasetSplit.split_n(data, rels_2[0], n//2, do_sort=do_sort))
+            rels_n.extend(DatasetSplit.split_n(data, rels_2[1], n//2+n%2, do_sort=do_sort))
             return rels_n
+
+    @staticmethod
+    def process_one(fp,dataset_configuration,mask,i,export_path,data_chunks):
+
+        dataset=dataset_configuration
+        shutil.rmtree(f"{export_path}/tmp", ignore_errors=True)
+        os.makedirs(export_path+'/tmp',exist_ok=True)
+        #here would be chunked data...
+
+        c=1
+        for chunk in tqdm(data_chunks, desc="Processing chunks", unit="chunks"):
+            #print('Chunk',c,'/',len(data_chunks))
+            dataset.sources=[]
+            dataset.targets=[]
+            curr_ch=copy.deepcopy(chunk)
+            dataset.load_data(curr_ch)
+            dataset.all_rel=mask
+            dataset.data.all_rel=mask
+            dataset._bag_of_words_rel_cache_init()
+            dataset.generate_dataset()
+            dataset.save(f"{export_path}/tmp/{i}_{c}")
+            c+=1
+            del curr_ch
+
+        saved_files_s=glob(f"{export_path}/tmp/{i}_*sources.pt")
+        saved_files_t=glob(f"{export_path}/tmp/{i}_*targets.pt")
+
+        dataset.merge_file(saved_files_s,saved_files_t,f"{export_path}/{i}")
+
+        shutil.rmtree(f"{export_path}/tmp", ignore_errors=True)
+        dataset._pack_scheme()
+        dataset.export_scheme(f"{export_path}/{i}.json")
+        dataset.export_bow(f"{export_path}/{i}_bow.json")
+
+        print(len(dataset.sources[0]))
+        print(len(dataset.targets[0]))
 
 
     @staticmethod
-    def make_multiple_datasets(fp,dataset_configuration,n=3,export_path='.',do_sort=True):
-        dataset_configuration.load_data_from_file(fp)
+    def make_multiple_datasets(dataset_configuration,fp=None,n=3,export_path='.',do_sort=True,max_sen=400,chunks_dir=None,ignored=[],strip_colon=True,val_chunks=None,export_val='.'):
+
+        if chunks_dir is not None:
+            lst_ch=glob(chunks_dir+'/*.conllubin')
+            datas=[joblib.load(x) for x in lst_ch if 'template' not in x]
+            base=[joblib.load(x) for x in lst_ch if 'template' in x][0]
+            dataset_configuration.load_data(base)
+
+        else:
+            dataset_configuration.load_data_from_file(fp)
+            datas=ConlluDataset.split_into_chunks(dataset_configuration.data,max_sen)
+
+        if val_chunks is not None:
+            lst_ch=glob(val_chunks+'/*.conllubin')
+            datas_val=[joblib.load(x) for x in lst_ch if 'template' not in x]
+            base_val=[joblib.load(x) for x in lst_ch if 'template' in x][0]
+
         dataset_configuration._init_bert()
-        masks=DatasetSplit.split_n(dataset_configuration.data,dataset_configuration.data.all_rel,n,do_sort=do_sort)
-        datasets=[]
 
-        print(masks)
+
+        rels_f=dataset_configuration.data.all_rel
+
+        if strip_colon:
+            rels_f=[x.split(':')[0] for x in rels_f]
+            dataset_configuration.data.tokens=[DatasetSplit.strip_colon_token(x) for x in dataset_configuration.data.tokens]
+            
+
+        rels_f=DatasetSplit.mod_rels(rels_f,ignored=ignored)
+        masks=DatasetSplit.split_n(dataset_configuration.data,rels_f,n,do_sort=do_sort)
+
+        print('masks',masks)
         for i in range(len(masks)):
-            mask=masks[i]
-            dataset=copy.deepcopy(dataset_configuration)
-            dataset.data.all_rel=mask
-            dataset._reinit()
-            dataset.generate_dataset()
-            dataset._pack_scheme()
-            datasets.append(dataset)
-            os.makedirs(export_path,exist_ok=True)
-            dataset.export_scheme(f"{export_path}/{i}.json")
-            dataset.save(f"{export_path}/{i}.pt")
-
-            print(len(dataset.sources[0]))
-            print(len(dataset.targets[0]))
-            #print(dataset.sources[0])
-            #print(dataset.targets[0])
+            DatasetSplit.process_one(fp,dataset_configuration,masks[i],i,export_path,datas)
+            DatasetSplit.process_one(fp,dataset_configuration,masks[i],i,export_val,datas_val)
 
         dataset_configuration._unload_bert()
-        return datasets
 
+    @staticmethod
+    def mod_rels(rels, ignored={'punct', 'dep', 'dislocated', 'orphan', 'list', 'vocative', 'expl', 'flat'}):
+        rels=[x for x in rels if x not in ignored]
+        return rels
+
+    @staticmethod
+    def strip_colon_token(token):
+        if ':' in token['relation']:
+            token["relation"]=token["relation"].split(':')[0]
+        return token
+
+
+    
 
 if __name__=='__main__':
-    b=SynTagRusBinarizer(use_bert=True,batch_size=2048,use_sentenceemb=True,predict_head=True,use_head=False,sentence_batch=200)
+    b=SynTagRusBinarizer(use_bert=True,batch_size=4000,use_sentenceemb=True,predict_head=True,use_head=True,sentence_batch=600, use_s_no=False, use_distance=False)
     #DatasetSplit.make_multiple_datasets('dataset/ru_syntagrus-ud-train-a.conllu',b,export_path='large')
-    DatasetSplit.make_multiple_datasets('dataset/slice.conllu',b,export_path='slice')
+    #DatasetSplit.make_multiple_datasets('dataset/slice.conllu',b,export_path='slice')
+    DatasetSplit.make_multiple_datasets(b,'dataset/bigger.conllu',export_path='bigger')
