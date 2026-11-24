@@ -106,6 +106,10 @@ class ConlluDataset:
             self._proc_lines(lines)
         self.reinit()
 
+    def compute_from_lines(self,lines):
+        self._proc_lines(lines)
+        self.reinit()
+
 
     def reinit(self):
         self._find_all_features()
@@ -189,56 +193,7 @@ class ConlluDataset:
         text=text.split('\n')
         return text
 
-    @staticmethod
-    def convert_request(req):
-        '''
-        # sent_id = 2003Anketa.xml_2
-        # text = Начальник областного управления связи Семен Еремеевич был человек простой, приходил на работу всегда вовремя, здоровался с секретаршей за руку и иногда даже писал в стенгазету заметки под псевдонимом "Муха".
-        1	Начальник	начальник	NOUN	_	Animacy=Anim|Case=Nom|Gender=Masc|Number=Sing	8	nsubj	8:nsubj	_
-        2	областного	областной	ADJ	_	Case=Gen|Degree=Pos|Gender=Neut|Number=Sing	3	amod	3:amod	_
-        3	управления	управление	NOUN	_	Animacy=Inan|Case=Gen|Gender=Neut|Number=Sing	1	nmod	1:nmod:gen	_
-        4	связи	связь	NOUN	_	Animacy=Inan|Case=Gen|Gender=Fem|Number=Sing	3	nmod	3:nmod:gen	_
-        5	Семен	Семен	PROPN	_	Animacy=Anim|Case=Nom|Gender=Masc|NameType=Giv|Number=Sing	1	appos	1:appos	_
-        '''
 
-        lines=[]
-        lines.append(f"# text = {req['sentence']}")
-        curr_p=1
-        words=req['wordPositions']
-        root_pos=0
-        #dep_pos=0
-        w1=[]
-        w2=[]
-        for word in words:
-            word=word[0] #is list necessary
-            if "link" in word.keys():
-                feats=word['FEAT'][1:] #not vlear
-                if len(feats)==0:
-                    feats='_'
-                else:
-                    feats=feats[0]
-                w=[curr_p,word['word'],'_',word['FEAT'][0],'_',feats,0,word['link'],'_','_']
-                if 'dep_word' in word.keys():
-                    #dep_pos=curr_p
-                    w1=w
-                if 'main_word' in word.keys():
-                    root_pos=curr_p
-                    w[-3]='_'
-                    w2=w
-                
-            else:
-                header=f"{curr_p}\t"
-                header+='\t'.join(['_']*9)
-                lines.append(header)
-            curr_p+=1
-
-        w1[6]=root_pos
-        lines.append('\t'.join(w1))
-        lines.append('\t'.join(w2))
-        return lines
-
-
-        
 
 d=ConlluDataset()
 d.compute(['dataset/ru_syntagrus-ud-train-a.conllu','dataset/ru_syntagrus-ud-train-b.conllu'])

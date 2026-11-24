@@ -33,14 +33,14 @@ class Models:
         weights = {0: zero_weight}
         if zero_weight is None:
             weights='balanced'
-        self.model=OneVsRestClassifier(LogisticRegression(max_iter=max_iter))
+        self.model=OneVsRestClassifier(LogisticRegression(max_iter=max_iter,solver="liblinear",class_weight=weights))
         #self.model = SGDClassifier(loss='log_loss', max_iter=max_iter, class_weight=weights)
 
     def InitSVM(self,zero_weight=None):
         weights = {0: zero_weight}
         if zero_weight is None:
             weights='balanced'
-        self.model=OneVsRestClassifier(SVC(kernel='rbf',C=1.0,gamma='scale'))
+        self.model=OneVsRestClassifier(SVC(kernel='rbf',C=1.0,gamma='scale',probability=True))
 
     def train_model(self,X_train,y_train,scaled_X=True,thr=0.1):
         if not scaled_X:

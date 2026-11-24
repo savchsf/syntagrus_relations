@@ -619,6 +619,7 @@ class DatasetSplit:
 
         if val_chunks is not None:
             lst_ch=glob(val_chunks+'/*.conllubin')
+            print(lst_ch)
             datas_val=[joblib.load(x) for x in lst_ch if 'template' not in x]
             base_val=[joblib.load(x) for x in lst_ch if 'template' in x][0]
 

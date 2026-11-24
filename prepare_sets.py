@@ -24,6 +24,7 @@ import shutil
 from collections import Counter
 
 from general_utils import get_prefixes
+import copy
 
 all_balance_mathods=["NearMiss1","NearMiss2","NearMiss3",
                      'TomekLinks',"RandomUnderSampler","EditedNearestNeighbours",
@@ -47,6 +48,9 @@ class BalancedSet:
 
 
     def load_from_scheme_for_eval(self,scheme,data_path,data_path_val):
+
+        print(data_path,data_path_val)
+
         scheme=self.load_scheme(scheme)
         bname=None
         if scheme['use_bert']:
@@ -59,8 +63,11 @@ class BalancedSet:
                                     use_s_no=scheme['use_s_no'],use_distance=scheme['use_distance'],
                                     binary=scheme['binary'], sentence_batch=1
                                     )
+        
         if not self.dataset.binary:
             self.dataset.data.all_rel=list(scheme['outputs'].values())
+
+        self.dataset_val=copy.deepcopy(self.dataset)
 
         self.dataset.all_rel=scheme['outputs']
 
@@ -184,7 +191,7 @@ class BalancedSet:
     
         #5: unsqueeze targets
         self.y_train=[self.dataset.depickle_result(x) for x in self.y_train]
-        self.y_test=[self.dataset.depickle_result(x) for x in self.y_test]
+        #self.y_test=[self.dataset.depickle_result(x) for x in self.y_test]
 
         #return
         self.finalize(exp_path+'/'+prefix)
@@ -215,7 +222,7 @@ class BalancedSet:
         del self.X_test
         del self.y_test
 
-    def export_dataset(self,scheme,data_path,k=2,test_size=0.03,exp_path='./',prefix='0',balance=all_balance_mathods, h_balance=all_balance_mathods):
+    def export_dataset(self,scheme,data_path,k=2,test_size=0.03,exp_path='./',prefix='0',balance=all_balance_mathods, h_balance=all_balance_mathods,data_path_val=''):
 
         os.makedirs(exp_path,exist_ok=True)
 
@@ -242,18 +249,19 @@ class BalancedSet:
 
 class DatasetBalance:
     @staticmethod
-    def process_subset(directory,prefix,scaler,test_size,k,exp_path,balance=all_balance_mathods,h_balance=[]):
+    def process_subset(directory,prefix,scaler,test_size,k,exp_path,balance=all_balance_mathods,h_balance=[],data_path_val=''):
         b=BalancedSet()
         b.set_scaler(scaler)
         gen_path=directory+'/'+prefix
-        b.export_dataset(gen_path+'.json',gen_path,test_size=test_size,k=k,exp_path=exp_path,prefix=prefix,balance=balance,h_balance=h_balance)
+        gen_path_val=data_path_val+'/'+prefix
+        b.export_dataset(gen_path+'.json',gen_path,test_size=test_size,k=k,exp_path=exp_path,prefix=prefix,balance=balance,h_balance=h_balance,data_path_val=gen_path_val)
         shutil.copyfile(gen_path+'.json',exp_path+'/'+prefix+'.json')
         shutil.copyfile(gen_path+'_bow.json',exp_path+'/'+prefix+'_bow.json')
 
 
     @staticmethod
     def process_all(directory,exp_path,
-                    scaler,test_size=0.3,k=2,balance=None, h_balance=None
+                    scaler,test_size=0.3,k=2,balance=None, h_balance=None,data_path_val=''
                     ):
         prefixes=get_prefixes(directory)
 
@@ -266,7 +274,7 @@ class DatasetBalance:
         c=0
 
         for prefix in prefixes:
-            DatasetBalance.process_subset(directory,prefix,scaler,test_size,k,exp_path,balance=balance[c],h_balance=h_balance[c])
+            DatasetBalance.process_subset(directory,prefix,scaler,test_size,k,exp_path,balance=balance[c],h_balance=h_balance[c],data_path_val=data_path_val)
             c+=1
 
 if __name__=='__main__':

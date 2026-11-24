@@ -1,14 +1,14 @@
 {
     "exp_dir": "testt",
-    "dataset_path": ["dataset/ru_syntagrus-ud-train-a.conllu","dataset/ru_syntagrus-ud-train-b.conllu","dataset/ru_syntagrus-ud-train-c.conllu"],
+    "dataset_path": ["dataset/ru_syntagrus-ud-train-a.conllu"],
     "val_dataset_path": "dataset/ru_syntagrus-ud-test.conllu",
     "max_sentences":800,
 
     "datasets_subdir":"conllu_parts",
     "binarized_subdir":"binarized_data",
 
-    "datasets_subdir_val":"conllu_parts",
-    "binarized_subdir_val":"binarized_data",
+    "datasets_subdir_val":"conllu_parts_val",
+    "binarized_subdir_val":"binarized_data_val",
 
     "balanced_subdir":"balanced_data",
     "models_subdir":"result",
@@ -37,26 +37,26 @@
     "methods":[
               [],
         [],
-        ["NearMiss3"],
-        ["TomekLinks"], ["ADASYN"], ["SMOTE"]
+        [],
+       [],[],[]
             ],
 
     "head_methods":[
+       [],
         [],
         [],
-        ["RandomUnderSampler"],
-        ["RandomUnderSampler"], ["RandomOverSampler"], ["RandomOverSampler"]
+       [],[],[]
     ],
 
     "test_size":0.2,
     "k":2,
 
-    "model":"SVM",
-    "zero_weight": [6.0,6.0,6.0,6.0,6.0,6.0],
+    "model":"Logistic",
+    "zero_weight": [null,null,null,null,null,null],
     "zero_weight_h": [null,null,null,null,null,null],
     "zero_threshold":0.1,
     "stages":[
-          "1"
+         "4"
     ]
 
 }

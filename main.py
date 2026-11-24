@@ -22,9 +22,10 @@ def main():
     if "1" in config["stages"]:
         print("1. Parsing conllu...")
         dataset=ConlluDataset(config["unk_token"])
-        dataset.compute(config["val_dataset_path"])
-        datas=ConlluDataset.split_into_chunks(dataset,config['max_sentences'],exp_d+'/'+config["datasets_subdir"])
         dataset.compute(config["dataset_path"])
+        datas=ConlluDataset.split_into_chunks(dataset,config['max_sentences'],exp_d+'/'+config["datasets_subdir"])
+        dataset=ConlluDataset(config["unk_token"])
+        dataset.compute(config["val_dataset_path"])
         datas_val=ConlluDataset.split_into_chunks(dataset,config['max_sentences'],exp_d+'/'+config["datasets_subdir_val"])
         print('Conllu parsed!')
 
@@ -37,8 +38,8 @@ def main():
                                 use_s_no= config["use_s_no"], use_distance= config["use_distance"], binary= config["binary"], sentence_batch= config["batch_sentence"]
 
                                 )
-        DatasetSplit.make_multiple_datasets(dataset_configuration=bin_,n=config["n_predictors"], export_path=exp_d+'/'+config['binarized_subdir'], chunks_dir=exp_d+'/'+config['datasets_subdir'],ignored=config['ignored'],strip_colon=config['strip_colon']
-                                            val_chunks=config['datasets_subdir_val'],export_val=config['binarized_subdir_val']
+        DatasetSplit.make_multiple_datasets(dataset_configuration=bin_,n=config["n_predictors"], export_path=exp_d+'/'+config['binarized_subdir'], chunks_dir=exp_d+'/'+config['datasets_subdir'],ignored=config['ignored'],strip_colon=config['strip_colon'],
+                                            val_chunks=exp_d+'/'+config['datasets_subdir_val'],export_val=exp_d+'/'+config['binarized_subdir_val']
                                             )
         print('Binarized!')
 
@@ -56,7 +57,7 @@ def main():
                 raise ValueError("Select a valid scaler")
 
 
-        DatasetBalance.process_all(exp_d+'/'+config['binarized_subdir'], exp_d+'/'+config['balanced_subdir'], scaler=scaler, test_size=config["test_size"], k=config["k"], balance=config["methods"],h_balance=config["head_methods"])
+        DatasetBalance.process_all(exp_d+'/'+config['binarized_subdir'], exp_d+'/'+config['balanced_subdir'], scaler=scaler, test_size=config["test_size"], k=config["k"], balance=config["methods"],h_balance=config["head_methods"],data_path_val=exp_d+'/'+config['binarized_subdir_val'])
         print("Balanced!")
 
     if "4" in config["stages"]:
