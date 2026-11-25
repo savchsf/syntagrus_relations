@@ -194,7 +194,7 @@ class BalancedSet:
         #self.y_test=[self.dataset.depickle_result(x) for x in self.y_test]
 
         #return
-        self.finalize(exp_path+'/'+prefix)
+        self.finalize(exp_path+'/'+str(prefix))
         del self.X_train
         del self.y_train
         del self.X_test
@@ -215,7 +215,7 @@ class BalancedSet:
         self.do_balance(k=k,methods=balance)
         #return
 
-        self.finalize(exp_path+'/'+prefix+'_heads')
+        self.finalize(exp_path+'/'+str(prefix)+'_heads')
 
         del self.X_train
         del self.y_train
@@ -232,7 +232,7 @@ class BalancedSet:
         if self.dataset.predict_head:
             self.prepare_sets_head(k,test_size,exp_path,prefix,balance=h_balance)
 
-        self.scaler.save(exp_path+'/'+prefix+'_scaler.pkl')
+        self.scaler.save(exp_path+'/'+str(prefix)+'_scaler.pkl')
 
 
     def save_train_test(self, path):
@@ -252,11 +252,11 @@ class DatasetBalance:
     def process_subset(directory,prefix,scaler,test_size,k,exp_path,balance=all_balance_mathods,h_balance=[],data_path_val=''):
         b=BalancedSet()
         b.set_scaler(scaler)
-        gen_path=directory+'/'+prefix
-        gen_path_val=data_path_val+'/'+prefix
+        gen_path=directory+'/'+str(prefix)
+        gen_path_val=data_path_val+'/'+str(prefix)
         b.export_dataset(gen_path+'.json',gen_path,test_size=test_size,k=k,exp_path=exp_path,prefix=prefix,balance=balance,h_balance=h_balance,data_path_val=gen_path_val)
-        shutil.copyfile(gen_path+'.json',exp_path+'/'+prefix+'.json')
-        shutil.copyfile(gen_path+'_bow.json',exp_path+'/'+prefix+'_bow.json')
+        shutil.copyfile(gen_path+'.json',exp_path+'/'+str(prefix)+'.json')
+        shutil.copyfile(gen_path+'_bow.json',exp_path+'/'+str(prefix)+'_bow.json')
 
 
     @staticmethod

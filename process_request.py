@@ -46,8 +46,6 @@ def convert_request(req):
     return lines
 
 def to_conllu(request,all_features=None,all_rel=None,all_pos=None,all_words=None):
-    with open('req.json',encoding='utf-8') as f:
-        request=json.load(f)
     
     lines=convert_request(request)
 
@@ -91,25 +89,77 @@ def bin_conllu(con_req,bin_example=None,masks=None):
         raise ValueError("pass rel mask as parameter")
 
     bin_example.load_data(con_req)
-    bin_example.all_rel=mask
-    bin_example.data.all_rel=mask
+    bin_example.all_rel=masks
+    bin_example.data.all_rel=masks
     bin_example._bag_of_words_rel_cache_init()
     bin_example.generate_dataset(ratio=0)
+    #print(bin_example.data.tokens)
 
     return bin_example.sources
 
 from models import *
 import joblib
 
-def evaluate(req_bin,model_dir,model_idx,target_idx):
+def evaluate(req_bin,model_dir,model_idx):
     model=joblib.load(model_dir+f'/{model_idx}_model.pth')
-    scaler=joblib.load(model_dir+f'/{model_idx}_skaler.pkl')
+    scaler=joblib.load(model_dir+f'/{model_idx}_scaler.pkl')
     model.scaler=scaler
-    result=model.predict(req_bin)
+    result=model.predict_proba(req_bin)
     #target_idx - idx of given rel, relative, not global
-    return result, result[target_idx]
+    return result
+
+def one_request(request,directory):
+
+    target_rel=request['wordPositions']
+    target_rel=[x[0]['link']for x in target_rel  if 'link' in x[0] ][0]
+
+    n_pred,idx=find_idx(target_rel,directory)
+
+    bow=f'{directory}/{n_pred}_bow.json'
+    with open(bow,encoding='utf-8') as f:
+        bow=json.load(f)
+
+    config=f'{directory}/{n_pred}.json'
+    with open(config,encoding='utf-8') as f:
+        config=json.load(f)
+
+    bin_=SynTagRusBinarizer(use_bert=config["use_bert"],bert_name=config["bert_name"], batch_size=2,
+                                unk_token= config["unk_token"], use_head= config["use_head"], predict_head = False,
+                                use_pos= config["use_pos"], use_morph= config["use_morph"], use_sentenceemb= config["use_sentenceemb"],
+                                use_s_no= config["use_s_no"], use_distance= config["use_distance"], binary= config["binary"], sentence_batch=1
+                                )
+
+    all_features=None
+    all_rel=bow['all_rel']
+    all_pos=None
+    all_words=None
+
+    if config['use_pos']:
+        all_pos=bow['all_pos']
+    if config['use_morph']:
+        all_features=bow['all_features']
+    if not config['use_bert']:
+        all_words=bow['all_words']
+
+
+    res=to_conllu(request,all_features,all_rel,all_pos,all_words)
+    target_rel=[x['relation']  for x in res.tokens if x['relation']!='_'][0]
+    
+
+    src=bin_conllu(res,bin_,bow['all_rel'])
+    #print(src)
+
+    vector=evaluate(src,directory,n_pred)[0]
+    return vector[idx]
+
+
 
 if __name__=="__main__":
+    with open('req.json',encoding='utf-8') as f:
+        request=json.load(f)
 
-    res=to_conllu('req.json')
-    print(res.tokens)
+    directory=input('model directory: ')
+    reqs=[request]
+    for i in reqs:
+        r=one_request(i,directory)
+        print(r)

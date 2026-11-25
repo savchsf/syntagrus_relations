@@ -276,14 +276,15 @@ class SynTagRusBinarizer(Binarizer):
         return new_token
 
     def generate_from_other_words_in_sentence(self,ratio=0.5):
-        #этот работает с данными из парсера
-        data_used=[x for x in self.data.tokens if x['relation'] in self.all_rel]
-        n_new=math.ceil(len(data_used)*ratio)
-        selected_tokens=random.sample(data_used,k=n_new)
+        if ratio>0:
+            #этот работает с данными из парсера
+            data_used=[x for x in self.data.tokens if x['relation'] in self.all_rel]
+            n_new=math.ceil(len(data_used)*ratio)
+            selected_tokens=random.sample(data_used,k=n_new)
 
-        new_tokens=[self._GFOWIS(x) for x in selected_tokens]
+            new_tokens=[self._GFOWIS(x) for x in selected_tokens]
 
-        self.data.tokens.extend(new_tokens)
+            self.data.tokens.extend(new_tokens)
 
     def _one_negative_head(self,s,t):
         new_source=copy.deepcopy(s)
@@ -292,30 +293,32 @@ class SynTagRusBinarizer(Binarizer):
         return new_source, new_target
 
     def generate_negative_heads(self,ratio=0.5):
-        #работает со списками из np.array
-        n_new=math.ceil(len(self.targets)*ratio)
-        #print(n_new)
-        selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
-        res_s=[]
-        res_t=[]
-        for i in selected_indices:
-            cs,ct=self._one_negative_head(self.sources[i],self.targets[i])
-            res_s.append(cs)
-            res_t.append(ct)
-        self.sources.extend(res_s)
-        self.targets.extend(res_t)
+        if ratio>0:
+            #работает со списками из np.array
+            n_new=math.ceil(len(self.targets)*ratio)
+            #print(n_new)
+            selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
+            res_s=[]
+            res_t=[]
+            for i in selected_indices:
+                cs,ct=self._one_negative_head(self.sources[i],self.targets[i])
+                res_s.append(cs)
+                res_t.append(ct)
+            self.sources.extend(res_s)
+            self.targets.extend(res_t)
 
     def generate_new_head(self,ratio=0.3):
-        n_new=math.ceil(len(self.targets)*ratio)
-        selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
-        res_s=[]
-        res_t=[]
-        for i in selected_indices:
-            cs,ct=self._invert_head(self.sources[i],self.targets[i])
-            res_s.append(cs)
-            res_t.append(ct)
-        self.sources.extend(res_s)
-        self.targets.extend(res_t)
+        if ratio>0:
+            n_new=math.ceil(len(self.targets)*ratio)
+            selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
+            res_s=[]
+            res_t=[]
+            for i in selected_indices:
+                cs,ct=self._invert_head(self.sources[i],self.targets[i])
+                res_s.append(cs)
+                res_t.append(ct)
+            self.sources.extend(res_s)
+            self.targets.extend(res_t)
 
 
     #------SHUFFLE------
@@ -334,17 +337,18 @@ class SynTagRusBinarizer(Binarizer):
         return new_s,new_t
 
     def shuffle_head(self,ratio=0.5):
+        if ratio>0:
         #со списками из np.array
-        n_new=math.ceil(len(self.targets)*ratio)
-        selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
-        res_s=[]
-        res_t=[]
-        for i in selected_indices:
-            cs,ct=self._invert_head(self.sources[i],self.targets[i])
-            res_s.append(cs)
-            res_t.append(ct)
-        self.sources.extend(res_s)
-        self.targets.extend(res_t)
+            n_new=math.ceil(len(self.targets)*ratio)
+            selected_indices=random.sample(list(range(len(self.targets))),k=n_new)
+            res_s=[]
+            res_t=[]
+            for i in selected_indices:
+                cs,ct=self._invert_head(self.sources[i],self.targets[i])
+                #res_s.append(cs)
+                #res_t.append(ct)
+            self.sources.extend(res_s)
+            self.targets.extend(res_t)
 
     def generate_dataset(self,ratio=0.3,do_shuffle=True):
 

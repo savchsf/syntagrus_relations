@@ -33,18 +33,23 @@ class Models:
         weights = {0: zero_weight}
         if zero_weight is None:
             weights='balanced'
-        self.model=OneVsRestClassifier(LogisticRegression(max_iter=max_iter,solver="liblinear",class_weight=weights))
-        #self.model = SGDClassifier(loss='log_loss', max_iter=max_iter, class_weight=weights)
+        
+        #self.model=OneVsRestClassifier(LogisticRegression(max_iter=max_iter,solver="lbfgs",class_weight=weights),n_jobs=-1)
+        self.model = SGDClassifier(loss='log_loss', max_iter=max_iter, class_weight=weights)
 
     def InitSVM(self,zero_weight=None):
         weights = {0: zero_weight}
         if zero_weight is None:
             weights='balanced'
-        self.model=OneVsRestClassifier(SVC(kernel='rbf',C=1.0,gamma='scale',probability=True))
+        #self.model=OneVsRestClassifier(SVC(kernel='rbf',C=1.0,gamma='scale',probability=True))
+        self.model = SGDClassifier(loss='hinge', max_iter=max_iter, class_weight=weights)
 
     def train_model(self,X_train,y_train,scaled_X=True,thr=0.1):
         if not scaled_X:
             X_train=self.scaler.transform(X_train)
+
+        if y_train.ndim==2:
+            y_train=np.asarray([self.one_hot_class(x,thr) for x in y_train])
 
         #print(y_train)
         #y_train=np.asarray([self.one_hot_class(x,thr) for x in y_train])
@@ -64,11 +69,11 @@ class Models:
             return 0
         return value+1
 
-    def evaluate_metric(self,y_test,y_pred,one_hot=True,thr=0.1,classes_str=['None']):
+    def evaluate_metric(self,y_test,y_pred,one_hot=False,thr=0.1,classes_str=['None']):
         
         if one_hot:
             y_test=np.asarray([self.one_hot_class(x,thr) for x in y_test])
-            y_pred=np.asarray([self.one_hot_class(x,thr) for x in y_pred])
+            #y_pred=np.asarray([self.one_hot_class(x,thr) for x in y_pred])
         
         else:
             y_pred=np.asarray([round(x) for x in y_pred])
@@ -84,6 +89,11 @@ class Models:
             X=self.scaler.transform(X)
         
         return self.model.predict(X)
+
+    def predict_proba(self,X,scaled_X=False):
+        if not scaled_X:
+            X=self.scaler.transform(X)
+        return self.model.predict_proba(X)
 
 class TrainModels:
 
@@ -111,7 +121,7 @@ class TrainModels:
 
         os.makedirs(save_dir,exist_ok=True)
 
-        save_path=save_dir+'/'+prefix
+        save_path=save_dir+'/'+str(prefix)
 
         with open(f'{directory}/{prefix}.json') as f:
             scheme=json.load(f)
