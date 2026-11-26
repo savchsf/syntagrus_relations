@@ -126,6 +126,8 @@ class ReqProcessor:
         model.scaler=scaler
         result=model.predict_proba(req_bin)
         #target_idx - idx of given rel, relative, not global
+        self.bin_.sources=[]
+        self.bin_.targets=[]
         return result
 
     def one_request(self,request):
@@ -175,21 +177,30 @@ if __name__=="__main__":
 
     directory=input('model directory: ')
     pipe_p=input('pipe path: ')
+    stop_seq=input('stop sequence: ')
 
     pr=ReqProcessor(directory)
-    '''reqs=[request]
-    for i in reqs:
-        r=pr.one_request(i)
-        print(r)'''
 
     if not os.path.exists(pipe_p):
         os.mkfifo(pipe_p)
 
-    with open(pipe_p,"r") as pipe:
-        request=pipe.read()
-        request=json.loads(request)
-        res=pr.one_request(request)
-        print(f"The probability of words {res[1]} and {res[2]}'s dependency to be {res[3]} is {res[0]:5f}")
+    while True:
+        with open(pipe_p,"r") as pipe:
+            request=pipe.read()
+
+        if request.strip()=='':
+            continue
+        
+        if request==stop_seq:
+            break
+        
+        else:
+            try:
+                request=json.loads(request)
+                res=pr.one_request(request)
+                print(f"The probability of words {res[1]} and {res[2]}'s dependency to be {res[3]} is {res[0]:5f}")
+            except Exception:
+                print(f'Wrong request format: the current request is {request}')
 
     os.unlink(pipe_p)
     pr.bin_._unload_bert()
